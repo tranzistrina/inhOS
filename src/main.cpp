@@ -485,11 +485,21 @@ void gesture(inh::Gesture g) {
     return;
   activeAt = millis();
   if (g == inh::Gesture::Hold) {
+    if (!fsReady) {
+      view = Format;
+      render();
+      return;
+    }
+    const bool resumeReader = !INH_APPS && view == Upload;
     vm.stop();
     stopNetwork();
     if (indexing) {
       indexing = false;
       building.close();
+    }
+    if (resumeReader) {
+      openBook();
+      return;
     }
     view = INH_APPS ? Home : Upload;
     if (view == Upload)
@@ -558,8 +568,10 @@ void gesture(inh::Gesture g) {
   } else if (view == Apps) {
     if (g == inh::Gesture::Single && !apps.empty())
       selection = (selection + 1) % apps.size();
-    if (g == inh::Gesture::Triple)
+    if (g == inh::Gesture::Triple) {
       view = Home;
+      selection = 0;
+    }
     if (g == inh::Gesture::Double && !apps.empty()) {
       File f = LittleFS.open("/" + apps[selection]);
       if (f.size() > 32768) {
