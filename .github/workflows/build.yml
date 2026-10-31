@@ -1,0 +1,28 @@
+name: build-and-test
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./tools/test.sh
+  firmware:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [reader_v12, apps_v12, reader_v11, apps_v11]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install platformio==6.2.0
+      - run: pio run -e ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: inhOS-${{ matrix.target }}-UNTESTED-ALPHA
+          path: |
+            .pio/build/${{ matrix.target }}/firmware.bin
+            .pio/build/${{ matrix.target }}/firmware.elf
+            .pio/build/${{ matrix.target }}/bootloader.bin
+            .pio/build/${{ matrix.target }}/partitions.bin
