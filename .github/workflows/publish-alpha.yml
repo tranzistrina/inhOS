@@ -1,0 +1,51 @@
+name: Publish downloadable alpha archive
+on:
+  push:
+    paths: ['.github/workflows/publish-alpha.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 41244347706
+          path: firmware-input
+      - name: Assemble exact tested source and firmware
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess,zipfile,shutil,json,hashlib
+          ref='cdc4e9ce79b82daeea353b8e61c2838456d9e74f'
+          subprocess.run(['git','archive','--format=zip','--output=source.zip',ref],check=True)
+          root=Path('package-src');root.mkdir()
+          with zipfile.ZipFile('source.zip') as z:z.extractall(root)
+          for target in ['reader_v12','apps_v12','reader_v11','apps_v11']:
+              folder=Path('firmware-input')/('inhOS-'+target+'-UNTESTED-ALPHA')
+              out=root/'.pio'/'build'/target;out.mkdir(parents=True)
+              for name in ['firmware.bin','firmware.elf','bootloader.bin','partitions.bin']:
+                  matches=list(folder.rglob(name))
+                  assert len(matches)==1,(target,name,matches)
+                  shutil.copy2(matches[0],out/name)
+          subprocess.run(['python3',str(root/'tools/package.py'),'reader_v12','apps_v12','reader_v11','apps_v11'],check=True)
+          archive=root/'build/inhOS-alpha.zip'
+          with zipfile.ZipFile(archive,'a',zipfile.ZIP_DEFLATED) as z:
+              z.writestr('BUILD_INFO.json',json.dumps({'commit':ref,'ci':'https://github.com/tranzistrina/inhOS/actions/runs/41244347706','hardware_tested':False},indent=2))
+          Path('downloads').mkdir(exist_ok=True)
+          dest=Path('downloads/inhOS-alpha-cdc4e9c.zip');shutil.copy2(archive,dest)
+          Path(str(dest)+'.sha256').write_text(hashlib.sha256(dest.read_bytes()).hexdigest()+'  '+dest.name+'\n')
+          PY
+      - name: Commit downloadable archive
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add downloads/inhOS-alpha-cdc4e9c.zip downloads/inhOS-alpha-cdc4e9c.zip.sha256
+          git diff --cached --quiet || git commit -m "Add downloadable alpha firmware and source archive"
+          git push origin HEAD:main
