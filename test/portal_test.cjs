@@ -1,0 +1,20 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+const h=fs.readFileSync('src/portal.h','utf8');assert(!h.includes('accept='),'Do not hide unknown file extensions in mobile pickers');
+const script=h.match(/<script>([\s\S]*?)<\/script>/)[1];
+function page(apps=true){const elements={};for(const id of ['file','kind','encoding','result','send','build'])elements[id]={files:[],value:id==='encoding'?'utf-8':'book',textContent:'',disabled:false};const requests=[];const cfg={edition:apps?'Apps':'Reader',version:'test',apps,max_app_bytes:32768,max_book_bytes:3145728};
+ class DOMParser {parseFromString(xml,type){assert.equal(type,'application/xml');if(xml==='broken')return {getElementsByTagNameNS(ns,tag){return tag==='parsererror'?[{}]:[];}};return {getElementsByTagNameNS(ns,tag){assert.equal(ns,'*');return tag==='body'?[{getElementsByTagNameNS(ns,tag){assert.equal(ns,'*');assert.equal(tag,'*');return [{localName:'p',textContent:'Первая строка'},{localName:'empty-line',textContent:''},{localName:'p',textContent:'Вторая строка'}];}}]:[];}};}}
+ const ctx=vm.createContext({document:{getElementById:id=>elements[id]},TextEncoder,TextDecoder,DOMParser,URLSearchParams,FileReader:class{},btoa:s=>Buffer.from(s,'binary').toString('base64'),fetch:async(path,options)=>{if(path==='/info')return {ok:true,json:async()=>cfg};requests.push({path,args:Object.fromEntries(options.body)});return {ok:true,status:200,text:async()=>path==='/finish'?'Готово':'OK'};}});vm.runInContext(script,ctx);return {elements,requests,ctx};}
+async function send(p,name,text){p.elements.file.files=[{name,arrayBuffer:async()=>new TextEncoder().encode(text).buffer}];p.elements.file.onchange();await p.elements.send.onclick();return p.requests;}
+function uploaded(p){return Buffer.concat(p.requests.filter(r=>r.path==='/chunk').map(r=>Buffer.from(r.args.data,'base64'))).toString('utf8');}
+(async()=>{
+ let p=page();await send(p,'01_GEOMETRY.INH','очисти()\r\nяви()\r');assert.equal(p.elements.kind.value,'app');assert.equal(p.requests[0].args.name,'01_GEOMETRY.inh');assert.equal(uploaded(p),'очисти()\nяви()\n');assert.equal(p.elements.result.textContent,'Готово');assert.equal(p.elements.send.disabled,false);
+ p=page();await send(p,'церковный пример с длинным названием'.repeat(4)+'.inh','а = 1');assert(p.requests[0].args.name.length<=36);assert(p.requests[0].args.name.endsWith('.inh'));
+ p=page(false);await send(p,'example.inh','а = 1');assert.equal(p.requests.length,0);assert.match(p.elements.result.textContent,/Reader/);assert.equal(p.elements.send.disabled,false);
+ p=page();await send(p,'book.FB2','<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0"><body/></FictionBook>');assert.equal(p.requests[0].args.name,'book.txt');assert.equal(uploaded(p),'Первая строка\n\nВторая строка');
+ p=page();await send(p,'book.fb2','broken');assert.equal(p.requests.length,0);assert.match(p.elements.result.textContent,/XML/);
+ p=page();await send(p,'book.txt','А\r\nБ\rВ');assert.equal(uploaded(p),'А\nБ\nВ');
+ p=page();await send(p,'archive.zip','garbage');assert.equal(p.requests.length,0);assert.match(p.elements.result.textContent,/расширение/);
+ p=page();await send(p,'big.inh','a'.repeat(32769));assert.equal(p.requests.length,0);assert.match(p.elements.result.textContent,/Размер/);
+ p=page();await send(p,'chunks.inh','я'.repeat(4000));const chunks=p.requests.filter(r=>r.path==='/chunk');assert(chunks.length>1);assert.deepEqual(chunks.map(c=>Number(c.args.offset)),[0,2048,4096,6144]);assert.equal(uploaded(p),'я'.repeat(4000));
+ console.log('PASS: actual portal JS, INH/TXT/FB2 upload flows, uppercase/UTF8 names, Reader rejection, normalization, limits, chunk offsets. Network/DOMParser are controlled test doubles; not a hardware test.');
+})().catch(e=>{console.error(e);process.exit(1);});

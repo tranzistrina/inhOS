@@ -6,6 +6,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: ./tools/test.sh
+      - run: node test/portal_test.cjs
   firmware:
     runs-on: ubuntu-latest
     strategy:
@@ -26,3 +27,38 @@ jobs:
             .pio/build/${{ matrix.target }}/firmware.elf
             .pio/build/${{ matrix.target }}/bootloader.bin
             .pio/build/${{ matrix.target }}/partitions.bin
+
+  archive:
+    needs: [core, firmware]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: firmware-input
+      - name: Package firmware and source
+        run: |
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          import shutil
+          for target in ['reader_v12','apps_v12','reader_v11','apps_v11']:
+              folder=Path('firmware-input')/('inhOS-'+target+'-UNTESTED-ALPHA')
+              out=Path('.pio/build')/target;out.mkdir(parents=True,exist_ok=True)
+              for name in ['firmware.bin','firmware.elf','bootloader.bin','partitions.bin']:
+                  matches=list(folder.rglob(name));assert len(matches)==1,(target,name)
+                  shutil.copy2(matches[0],out/name)
+          PYCODE
+          python3 tools/package.py reader_v12 apps_v12 reader_v11 apps_v11
+          cp build/inhOS-alpha.zip downloads/inhOS-0.1.1-alpha.zip
+          sha256sum downloads/inhOS-0.1.1-alpha.zip > downloads/inhOS-0.1.1-alpha.zip.sha256
+      - name: Publish archive in repository
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add downloads/inhOS-0.1.1-alpha.zip downloads/inhOS-0.1.1-alpha.zip.sha256
+          git diff --cached --quiet || git commit -m "Publish alpha 0.1.1 upload fix archive"
+          git push origin HEAD:main

@@ -25,6 +25,6 @@ with zipfile.ZipFile(root/'build'/'inhOS-alpha.zip','w',zipfile.ZIP_DEFLATED) as
         if f.is_file():z.write(f,'firmware/'+str(f.relative_to(out)))
     for f in root.rglob('*'):
         rel=f.relative_to(root)
-        if f.is_file() and not any(x in ['.pio','.git','build','__pycache__'] for x in rel.parts) and f.suffix not in ['.s','.o']:
+        if f.is_file() and not any(x in ['.pio','.git','build','__pycache__','downloads','firmware-input'] for x in rel.parts) and f.suffix not in ['.s','.o']:
             z.write(f,'source/'+str(rel))
 print(root/'build'/'inhOS-alpha.zip')

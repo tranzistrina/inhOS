@@ -270,24 +270,36 @@ File incoming;
 String destination;
 size_t expected = 0, received = 0;
 bool receiving = false;
-const char portal[] PROGMEM =
-    R"HTML(<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>inhOS</title><style>body{font:18px system-ui;max-width:650px;margin:40px auto;padding:16px;background:#eee;color:#222}button,input,select{font:inherit;margin:10px 0;max-width:100%}pre{white-space:pre-wrap}</style><h1>inhOS</h1><p>Загрузить книгу TXT/FB2 или приложение .inh</p><input type="file" id="file" accept=".txt,.fb2,.inh"><br><select id="encoding"><option>utf-8</option><option>windows-1251</option><option>utf-16le</option></select><br><button id="send">Загрузить</button><pre id="status"></pre><script>
-const status=document.getElementById('status');async function api(path,args){let r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(args)});let s=await r.text();if(!r.ok)throw Error(s);return s;}document.getElementById('send').onclick=async()=>{try{let f=document.getElementById('file').files[0];if(!f)throw Error('Выберите файл');let inh=f.name.toLowerCase().endsWith('.inh');let s=new TextDecoder(inh?'utf-8':document.getElementById('encoding').value,{fatal:true}).decode(await f.arrayBuffer());if(f.name.toLowerCase().endsWith('.fb2')){let xml=new DOMParser().parseFromString(s,'text/xml');if(xml.querySelector('parsererror'))throw Error('Ошибка FB2');xml.querySelectorAll('binary,coverpage').forEach(e=>e.remove());s=[...xml.querySelectorAll('body p,body subtitle,body empty-line')].map(e=>e.textContent).join('\n');}s=s.replace(/\r\n?/g,'\n');let bytes=new TextEncoder().encode(s);let name=inh?f.name.replace(/[^a-zA-Z0-9_.-]/g,'_'):'book.txt';await api('/begin',{name,size:bytes.length});for(let i=0;i<bytes.length;i+=2048){let part=bytes.slice(i,i+2048);await api('/chunk',{offset:i,data:btoa(String.fromCharCode(...part))});status.textContent=Math.floor(100*(i+part.length)/bytes.length)+'%';}status.textContent=await api('/finish',{});}catch(e){status.textContent=e.message;}};</script></html>)HTML";
+#include "portal.h"
 void network() {
   if (wifiOn)
     return;
   WiFi.mode(WIFI_AP);
   WiFi.softAP("inhOS", "inhreader");
   dns.start(53, "*", WiFi.softAPIP());
-  web.on("/", [] { web.send_P(200, "text/html; charset=utf-8", portal); });
+  web.on("/", [] { web.sendHeader("Cache-Control", "no-store"); web.send_P(200, "text/html; charset=utf-8", portal); });
+  web.on("/info", HTTP_GET, [] {
+    String json = "{\"version\":\"" INH_VERSION "\",\"edition\":\"";
+    json += INH_APPS ? "Apps" : "Reader";
+    json += "\",\"apps\":";
+    json += INH_APPS ? "true" : "false";
+    json += ",\"max_app_bytes\":32768,\"max_book_bytes\":3145728}";
+    web.sendHeader("Cache-Control", "no-store");
+    web.send(200, "application/json; charset=utf-8", json);
+  });
   web.on("/begin", HTTP_POST, [] {
     if (indexing || vm.running()) {
       web.send(409, "text/plain", "Устройство занято");
       return;
     }
     String n = web.arg("name");
+    n.toLowerCase();
     bool app = n.endsWith(".inh");
-    if ((app && !INH_APPS) || n.length() > 36 || n.indexOf("..") >= 0 ||
+    if (app && !INH_APPS) {
+      web.send(409, "text/plain; charset=utf-8", "Установлена Reader. Для приложений .inh нужна сборка Apps.");
+      return;
+    }
+    if (n.length() > 36 || n.indexOf("..") >= 0 ||
         (!app && n != "book.txt")) {
       web.send(400, "text/plain", "Неверное имя");
       return;
