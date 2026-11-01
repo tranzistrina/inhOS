@@ -1,5 +1,6 @@
 #include "Glagol.h"
 #include "Reader.h"
+#include "Orientation.h"
 #include <cassert>
 #include <cstring>
 #include <iostream>
@@ -23,6 +24,13 @@ static VM run(const std::string &s) {
   return v;
 }
 int main() {
+  for(int y=0;y<122;y++) for(int x=0;x<250;x++) {
+    auto p=inh::orientPixel(x,y,true);assert(p.x>=0 && p.x<250 && p.y>=0 && p.y<122);
+    auto q=inh::orientPixel(p.x,p.y,true);assert(q.x==x && q.y==y);
+    auto identity=inh::orientPixel(x,y,false);assert(identity.x==x && identity.y==y);
+  }
+  assert(inh::orientPixel(0,0,true).x==249 && inh::orientPixel(0,0,true).y==121);
+
   Source s;
   for (int i = 0; i < 9000; i++)
     s.s += "Страница " + std::to_string(i) + ": ёжик и яблоко.\n";

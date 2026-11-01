@@ -1,5 +1,6 @@
 #include "Glagol.h"
 #include "Reader.h"
+#include "Orientation.h"
 #include <Adafruit_GFX.h>
 #include <Arduino.h>
 #include <DNSServer.h>
@@ -41,7 +42,8 @@ volatile bool displayBusy = false, displayFault = false;
 volatile uint32_t sent = 0, shown = 0;
 uint32_t activeAt = 0, appWake = 0;
 bool fsReady = false, wifiOn = false;
-unsigned selection = 0;
+unsigned selection = 0, settingSelection = 0;
+bool flipped = true, pendingFlipped = true;
 int appInput = 0;
 enum View { Home, Reading, Apps, Settings, Upload, Application, Error, Format };
 View view = Home;
@@ -70,6 +72,7 @@ void text(int x, int y, const std::string &s) {
 void frame() {
   xSemaphoreTake(frameMutex, portMAX_DELAY);
   memcpy(pending, canvas.getBuffer(), sizeof pending);
+  pendingFlipped = flipped;
   ++sent;
   xSemaphoreGive(frameMutex);
   xTaskNotifyGive(displayTask);
@@ -79,8 +82,10 @@ void displayWorker(void *) {
   for (;;) {
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
     uint32_t version;
+    bool localFlipped;
     xSemaphoreTake(frameMutex, portMAX_DELAY);
     memcpy(local, pending, sizeof local);
+    localFlipped = pendingFlipped;
     version = sent;
     xSemaphoreGive(frameMutex);
     if (displayFault)
@@ -90,8 +95,10 @@ void displayWorker(void *) {
       screen.clearMemory();
       for (int y = 0; y < 122; y++)
         for (int x = 0; x < 250; x++)
-          if (local[y * 32 + x / 8] & (0x80 >> (x & 7)))
-            screen.drawPixel(x, y, BLACK);
+          if (local[y * 32 + x / 8] & (0x80 >> (x & 7))) {
+            const auto point = inh::orientPixel(x, y, localFlipped);
+            screen.drawPixel(point.x, point.y, BLACK);
+          }
       screen.update();
       shown = version;
     } catch (const std::exception &e) {
@@ -155,9 +162,10 @@ void render() {
              std::string(i == selection ? "> " : "  ") + choices[i]);
       }
     } else if (view == Settings) {
-      text(4, 38, "> Сброс позиции книги");
-      text(4, 60, "3 клика: назад");
-      text(4, 80, "2 клика: выполнить");
+      text(4, 38, std::string(settingSelection == 0 ? "> " : "  ") + "Разворот 180: " + (flipped ? "вкл." : "выкл."));
+      text(4, 58, std::string(settingSelection == 1 ? "> " : "  ") + "Сброс позиции книги");
+      text(4, 84, "1 клик: выбор; 2: изменить");
+      text(4, 104, "3 клика: назад");
     } else if (view == Apps) {
       if (apps.empty())
         text(4, 40, "Нет .inh приложений");
@@ -569,8 +577,10 @@ void gesture(inh::Gesture g) {
         network();
         view = Upload;
       }
-      if (selection == 3)
+      if (selection == 3) {
+        settingSelection = 0;
         view = Settings;
+      }
       if (selection == 4) {
         sleepNow();
         return;
@@ -605,13 +615,18 @@ void gesture(inh::Gesture g) {
     } else
       render();
   } else if (view == Settings) {
+    if (g == inh::Gesture::Single) settingSelection = (settingSelection + 1) % 2;
     if (g == inh::Gesture::Double) {
-      page = 0;
-      savePage();
-      view = Home;
+      if (settingSelection == 0) {
+        flipped = !flipped;
+        prefs.putBool("flip", flipped);
+      } else {
+        page = 0;
+        savePage();
+        view = Home;
+      }
     }
-    if (g == inh::Gesture::Triple)
-      view = Home;
+    if (g == inh::Gesture::Triple) view = Home;
     render();
   } else if (view == Error && g == inh::Gesture::Triple) {
     view = Home;
@@ -622,6 +637,7 @@ void setup() {
   Serial.begin(115200);
   pinMode(0, INPUT_PULLUP);
   prefs.begin("inhOS", false);
+  flipped = prefs.getBool("flip", true);
   source.f = &book;
   frameMutex = xSemaphoreCreateMutex();
   font.begin(canvas);
