@@ -23,7 +23,7 @@ struct Value {
   std::string str() const;
 };
 struct Op {
-  enum Code {
+  enum Code : uint16_t {
     Push,
     Load,
     Store,
@@ -38,14 +38,15 @@ struct Op {
     Jump,
     JFalse,
     JTrue
-  } code;
-  std::string name;
-  Value value;
-  int arg = 0;
-  int line = 0;
+  };
+  Code code;
+  uint16_t name = 0, arg = 0, line = 0;
+  double number = 0;
 };
+static_assert(sizeof(Op) == 16, "Bytecode must remain compact");
 struct Program {
   std::vector<Op> ops;
+  std::vector<std::string> names;
 };
 Program compile(const std::string &source);
 class VM {

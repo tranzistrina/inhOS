@@ -1,12 +1,17 @@
 #include "Glagol.h"
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
 #include <iomanip>
-#include <set>
 #include <sstream>
+#include <string_view>
 namespace inh {
+static void require(bool b, const char *s) {
+  if (!b)
+    throw std::runtime_error(s);
+}
 static void require(bool b, const std::string &s) {
   if (!b)
     throw std::runtime_error(s);
@@ -118,7 +123,7 @@ bool identifier(const Token &t) {
 }
 struct Line {
   int indent = 0, num = 0;
-  std::vector<Token> t;
+  std::string_view text;
 };
 struct Compiler {
   Program p;
@@ -126,14 +131,35 @@ struct Compiler {
   size_t pos = 0;
   int line = 1;
   unsigned hidden = 0;
+  bool dry = true;
+  size_t emitted = 0;
+  size_t count() const { return emitted; }
+  void target(size_t at, size_t to) {
+    if (!dry)
+      p.ops.at(at).arg = to;
+  }
   struct Loop {
     std::vector<size_t> breaks, continues;
   };
   std::vector<Loop> loops;
   size_t emit(Op::Code c, std::string name = {}, int arg = 0, Value v = {}) {
-    require(p.ops.size() < 8192, "программа слишком велика");
-    p.ops.push_back({c, std::move(name), std::move(v), arg, line});
-    return p.ops.size() - 1;
+    require(emitted < 8192, "программа слишком велика");
+    const size_t index = emitted++;
+    if (dry)
+      return index;
+    if (c == Op::Push && v.kind == Value::String) {
+      name = std::move(v.text);
+      arg = 1;
+    }
+    auto it = std::find(p.names.begin(), p.names.end(), name);
+    if (it == p.names.end()) {
+      require(p.names.size() < 512, "слишком много имён");
+      p.names.push_back(std::move(name));
+      it = p.names.end() - 1;
+    }
+    p.ops.push_back({c, uint16_t(it - p.names.begin()), uint16_t(arg),
+                     uint16_t(line), v.number});
+    return index;
   }
   void push(double n) { emit(Op::Push, "", 0, Value(n)); }
   struct Expr {
@@ -177,7 +203,7 @@ struct Compiler {
           size_t j = c.emit(op == "и" ? Op::JFalse : Op::JTrue);
           c.emit(Op::Drop);
           expression(level + 1);
-          c.p.ops[j].arg = c.p.ops.size();
+          c.target(j, c.count());
         } else {
           expression(level + (op == "**" ? 0 : 1));
           c.emit(Op::Binary, op);
@@ -253,7 +279,7 @@ struct Compiler {
       Line l = lines[pos];
       line = l.num;
       require(l.indent == indent, "неверный отступ");
-      const auto &t = l.t;
+      const auto t = lex(std::string(l.text));
       const std::string &head = t[0].s;
       if (head == "инако")
         return;
@@ -266,16 +292,17 @@ struct Compiler {
           auto no = emit(Op::JFalse);
           child(indent);
           if (pos < lines.size() && lines[pos].indent == indent &&
-              lines[pos].t[0].s == "инако") {
+              lex(std::string(lines[pos].text))[0].s == "инако") {
             auto end = emit(Op::Jump);
-            p.ops[no].arg = p.ops.size();
-            require(lines[pos].t.size() == 2 && lines[pos].t[1].s == ":",
+            target(no, count());
+            require(lex(std::string(lines[pos].text)).size() == 2 &&
+                        lex(std::string(lines[pos].text))[1].s == ":",
                     "инако:");
             pos++;
             child(indent);
-            p.ops[end].arg = p.ops.size();
+            target(end, count());
           } else
-            p.ops[no].arg = p.ops.size();
+            target(no, count());
         } else {
           loops.push_back({});
           std::string items, idx;
@@ -290,7 +317,7 @@ struct Compiler {
             push(0);
             emit(Op::Store, idx);
           }
-          start = p.ops.size();
+          start = count();
           if (head == "дондеже")
             expr(t, 1, t.size() - 1);
           else {
@@ -307,7 +334,7 @@ struct Compiler {
             emit(Op::Store, t[1].s);
           }
           child(indent);
-          auto advance = p.ops.size();
+          auto advance = count();
           if (head == "для") {
             emit(Op::Load, idx);
             push(1);
@@ -315,11 +342,11 @@ struct Compiler {
             emit(Op::Store, idx);
           }
           emit(Op::Jump, "", start);
-          p.ops[end].arg = p.ops.size();
+          target(end, count());
           for (auto j : loops.back().breaks)
-            p.ops[j].arg = p.ops.size();
+            target(j, count());
           for (auto j : loops.back().continues)
-            p.ops[j].arg = advance;
+            target(j, advance);
           loops.pop_back();
         }
       } else {
@@ -372,37 +399,48 @@ struct Compiler {
   }
 };
 } // namespace
-Program compile(const std::string &source) {
+static Program compileImpl(const std::string &source) {
   require(source.size() <= 32768, "приложение больше 32 КиБ");
   require(source.find('\0') == std::string::npos, "нулевой байт в коде");
   Compiler c;
-  std::istringstream input(source);
-  std::string s;
+  size_t from = 0;
   int number = 0;
+  while (from < source.size()) {
+    size_t end = source.find('\n', from);
+    if (end == std::string::npos)
+      end = source.size();
+    auto line = std::string_view(source).substr(from, end - from);
+    from = end + 1;
+    require(++number <= 1024, "слишком много строк");
+    if (number == 1 && line.substr(0, 3) == "\xef\xbb\xbf")
+      line.remove_prefix(3);
+    require(line.find('\t') == std::string_view::npos, "табуляция запрещена");
+    size_t indent = 0;
+    while (indent < line.size() && line[indent] == ' ')
+      indent++;
+    if (indent == line.size() || line[indent] == '#' || line[indent] == '\r')
+      continue;
+    require(indent % 4 == 0, "неверный отступ");
+    c.lines.push_back({int(indent), number, line.substr(indent)});
+  }
+  c.block(0);
+  require(c.pos == c.lines.size(), "инако без аще");
+  const auto count = c.count();
+  c.p.ops.reserve(count);
+  c.p.names.reserve(32);
+  c.dry = false;
+  c.emitted = 0;
+  c.pos = 0;
+  c.hidden = 0;
+  c.loops.clear();
+  c.block(0);
+  return std::move(c.p);
+}
+Program compile(const std::string &source) {
   try {
-    while (std::getline(input, s)) {
-      number++;
-      if (number == 1 && s.compare(0, 3, "\xef\xbb\xbf") == 0)
-        s.erase(0, 3);
-      require(number <= 1024, "слишком много строк");
-      int indent = 0;
-      while (indent < (int)s.size() && s[indent] == ' ')
-        indent++;
-      require(s.find('\t') == std::string::npos,
-              "табуляция запрещена; используйте пробелы");
-      auto t = lex(s.substr(indent));
-      if (t.empty())
-        continue;
-      require(indent % 4 == 0, "отступ должен быть кратен 4");
-      c.lines.push_back({indent, number, std::move(t)});
-    }
-    c.block(0);
-    require(c.pos == c.lines.size(), "инако без аще");
-    return c.p;
-  } catch (const std::exception &e) {
-    throw std::runtime_error("строка " +
-                             std::to_string(c.lines.empty() ? number : c.line) +
-                             ": " + e.what());
+    return compileImpl(source);
+  } catch (const std::bad_alloc &) {
+    throw std::runtime_error("Недостаточно RAM для приложения");
   }
 }
 void VM::start(Program p) {
@@ -415,9 +453,13 @@ void VM::start(Program p) {
 }
 void VM::stop() {
   running_ = false;
+  std::string().swap(error_);
   stack_.clear();
   vars_.clear();
-  program_.ops.clear();
+  Program empty;
+  program_.ops.swap(empty.ops);
+  program_.names.swap(empty.names);
+  std::vector<Value>().swap(stack_);
   pc_ = 0;
 }
 Value VM::pop() {
@@ -429,13 +471,17 @@ Value VM::pop() {
 void VM::memoryCheck() {
   require(stack_.size() <= 128 && vars_.size() <= 80, "лимит стека/переменных");
   size_t bytes = 0;
-  std::set<const void *> arrays;
+  std::array<const void *, 208> arrays{};
+  size_t seen = 0;
   auto add = [&](const Value &v) {
     if (v.kind == Value::String) {
       require(v.text.size() <= 2048, "строка больше 2048 байт");
       bytes += v.text.size();
     }
-    if (v.kind == Value::Array && arrays.insert(v.array.get()).second) {
+    if (v.kind == Value::Array &&
+        std::find(arrays.begin(), arrays.begin() + seen, v.array.get()) ==
+            arrays.begin() + seen) {
+      arrays[seen++] = v.array.get();
       require(v.array->size() <= 1024, "массив больше 1024 элементов");
       bytes += v.array->size() * sizeof(double);
     }
@@ -541,21 +587,22 @@ bool VM::tick(unsigned budget) {
         break;
       }
       const auto &o = program_.ops[pc_++];
+      const auto &name = program_.names.at(o.name);
       line = o.line;
       executed_++;
       switch (o.code) {
       case Op::Push:
-        stack_.push_back(o.value);
+        stack_.push_back(o.arg ? Value(name) : Value(o.number));
         break;
       case Op::Load: {
-        auto it = vars_.find(o.name);
-        require(it != vars_.end(), "нет переменной: " + o.name);
+        auto it = vars_.find(name);
+        require(it != vars_.end(), "нет переменной: " + name);
         stack_.push_back(it->second);
         break;
       }
       case Op::Store: {
         auto v = pop();
-        vars_[o.name] = std::move(v);
+        vars_[name] = std::move(v);
         break;
       }
       case Op::Drop:
@@ -590,15 +637,15 @@ bool VM::tick(unsigned budget) {
       }
       case Op::Unary: {
         auto v = pop();
-        stack_.push_back(o.name == "не"
+        stack_.push_back(name == "не"
                              ? Value(!v.truth())
-                             : Value(o.name == "-" ? -v.num() : v.num()));
+                             : Value(name == "-" ? -v.num() : v.num()));
         break;
       }
       case Op::Binary: {
         auto b = pop(), a = pop();
         Value r;
-        const auto &n = o.name;
+        const auto &n = name;
         if (n == "+" && (a.kind == Value::String || b.kind == Value::String)) {
           auto x = a.str(), y = b.str();
           require(x.size() + y.size() <= 2048, "строка слишком велика");
@@ -644,7 +691,7 @@ bool VM::tick(unsigned budget) {
         std::vector<Value> a(o.arg);
         for (int j = o.arg - 1; j >= 0; j--)
           a[j] = pop();
-        stack_.push_back(call(o.name, a));
+        stack_.push_back(call(name, a));
         break;
       }
       case Op::Jump:
@@ -661,6 +708,9 @@ bool VM::tick(unsigned budget) {
       require(pc_ <= program_.ops.size(), "неверный переход");
       memoryCheck();
     }
+  } catch (const std::bad_alloc &) {
+    stop();
+    error_ = "Недостаточно RAM; приложение остановлено";
   } catch (const std::exception &e) {
     error_ = "строка " + std::to_string(line) + ": " + e.what();
     running_ = false;
