@@ -40,7 +40,8 @@ public:
     char b[256];
     snprintf(b, sizeof b,
              "{\"protocol\":\"INHFS/1\",\"version\":\"" INH_VERSION
-             "\",\"total\":%u,\"free\":%u,\"block_size\":512,\"max_app\":32768,"
+             "\",\"total\":%u,\"free\":%u,\"book_toc\":1,\"block_size\":512,"
+             "\"max_app\":32768,"
              "\"max_book\":3145728,\"image_bytes\":3833,\"apps\":%s}",
              unsigned(LittleFS.totalBytes()),
              unsigned(LittleFS.totalBytes() - LittleFS.usedBytes()),
@@ -96,6 +97,13 @@ public:
                   !inh::decodeGinh(encodedPhoto.data(), encodedPhoto.size(),
                                    photoPixels)))
       return inh::usb::Invalid;
+    if (!strcmp(path, "/book.txt")) {
+      Source raw;
+      raw.reset(&f);
+      inh::BookLayout layout;
+      if (!inh::parseBook(raw, layout))
+        return inh::usb::Invalid;
+    }
     f.close();
     // Invalidate before the atomic replacement: after a power cut even an old
     // same-size index cannot be used with a new book. Old book is not removed.

@@ -1,12 +1,12 @@
-# inhOS 0.3.0-alpha — Heltec Wireless Paper V1.2
+# inhOS 0.4.0-alpha — Heltec Wireless Paper V1.2
 
-Reader, Glagol applications and native GINH photographs on ESP32-S3, 250x122, one GPIO0 button. **Hardware testing not performed.** See [verification report](docs/VERIFICATION-0.3.0.md) for USB/battery test boundaries and pending device checks; [0.2.0 report](docs/VERIFICATION-0.2.0.md) contains host memory measurements.
+Reader, Glagol applications and native GINH photographs on ESP32-S3, 250x122, one GPIO0 button. **Hardware testing not performed.** See [verification report](docs/VERIFICATION-0.4.0.md) for USB/battery test boundaries and pending device checks; [0.2.0 report](docs/VERIFICATION-0.2.0.md) contains host memory measurements.
 
 ## Downloads and update
 
-[Complete firmware/source/converter archive](downloads/inhOS-0.3.0-alpha.zip) is published by CI only after successful tests/builds. SHA-256 files are beside it and inside the archive. For V1.2 use `firmware/apps_v12/firmware.bin`.
+[Complete firmware/source/converter archive](downloads/inhOS-0.4.0-alpha.zip) is published by CI only after successful tests/builds. SHA-256 files are beside it and inside the archive. For V1.2 use `firmware/apps_v12/firmware.bin`.
 
-**Updating existing inhOS 0.1.x / 0.2.x:** write only this firmware.bin at **0x10000**, with the flash erase-all option disabled. `partitions.csv` is unchanged: 8MB flash, app 0x10000/0x300000, LittleFS 0x310000/0x4e0000. Saved books/apps/photos/NVS are preserved by this update. Do NOT use FIRST_INSTALL_0x0 for an ordinary update. Save a backup before flashing.
+**Updating existing inhOS 0.1.x / 0.2.x / 0.3.x:** write only this firmware.bin at **0x10000**, with the flash erase-all option disabled. `partitions.csv` is unchanged: 8MB flash, app 0x10000/0x300000, LittleFS 0x310000/0x4e0000. Saved books/apps/photos/NVS are preserved by this update. Do NOT use FIRST_INSTALL_0x0 for an ordinary update. Save a backup before flashing.
 
 First installation from unrelated firmware uses the bundled merged first-install image at 0x0 and the on-device explicit format confirmation. This is separate from updating inhOS. No automatic format on mount failure.
 
@@ -19,7 +19,13 @@ First installation from unrelated firmware uses the bundled merged first-install
 - Settings: orientation, sleep photograph (including built-in), file manager, reset reading position.
 - File manager: individual .inh/.ginh, book with indices, or all user files. Confirmation defaults to CANCEL; one click changes choice, double accepts, triple/hold cancels. File removal never requires reflashing or erase_flash. Orientation and chosen sleep image persist in NVS.
 
-## USB file manager (0.3.0)
+## FB2 contents (0.4.0)
+
+[Русская инструкция по оглавлению](docs/FB2-TOC.md). In the reader: four clicks open contents. One click moves down, triple moves up, double opens the selected chapter, four clicks or hold cancel to the exact original page. Chapter starts become page boundaries. Triple-click actions now wait for the normal 360ms inter-click timeout so the fourth click can be distinguished. The reader footer shows `4:огл.`; battery/orientation are unchanged.
+
+Re-upload existing FB2 using the updated Wi-Fi portal or 0.4.0 desktop client: older converters discarded section structure, which cannot be reconstructed reliably. Plain TXT keeps working and shows a no-contents message. XML-declared encodings (including Windows-1251) are auto-detected for FB2. Contents and UTF-8 text live in one checksummed `INHBOOK/1` envelope at `/book.txt`, so atomic USB/Wi-Fi replacement, download/backup and deletion stay single-file operations. No new user-accessible paths or partition changes. Existing page indexes rebuild once; plain TXT reading position remains saved.
+
+## USB file manager (introduced in 0.3.0)
 
 [Русская инструкция и готовые клиенты](desktop/README-RU.md), [INHFS/1 protocol](docs/INHFS-1.md). On the device select Settings → USB-файлы, then open the Windows/macOS client. CP2102 UART0, 115200 baud, native USB CDC disabled. Wi-Fi/app/indexing stop during the session; Deep-sleep is inhibited. Triple-click or hold exits. USB mode survives a reset on port open; after an established connection has no valid requests for 60 seconds the USB session closes and the device returns to normal mode. File transfers time out after 15 seconds without valid packets. GUI Disconnect returns to normal mode. Existing file data is replaced atomically only after validation; enough free space for the entire temporary copy is required.
 
@@ -33,7 +39,7 @@ Wireless Paper uses GPIO19 LOW to enable its 10K/10K divider, GPIO20/ADC2 channe
 
 ## Upload and manage
 
-Join Wi-Fi `inhOS` / password `inhreader`, open http://192.168.4.1 in a full browser. Upload TXT/FB2, .inh, .ginh; file list and confirmed delete actions are in the same portal. FB2 text conversion is in the browser; XML formatting/images/footnotes are not preserved. One current book up to 3MiB, app source up to 32KiB (complex programs may be rejected by resource limits), native image exactly 3833 bytes. User filenames normalize to ASCII. At least eight 10KiB apps and five photos are covered by host storage tests. Only the active app is loaded into RAM. Upload checks UTF-8/NUL/size in 256-byte blocks and does not compile apps; syntax/resource errors are reported on launch. Up to 64 names per UI list page-set; wipe iterates all batches.
+Join Wi-Fi `inhOS` / password `inhreader`, open http://192.168.4.1 in a full browser. Upload TXT/FB2, .inh, .ginh; file list and confirmed delete actions are in the same portal. FB2 conversion preserves section titles/nesting in the native contents table; images/formatting/interactive footnote links are not preserved. One current book up to 3MiB, app source up to 32KiB (complex programs may be rejected by resource limits), native image exactly 3833 bytes. User filenames normalize to ASCII. At least eight 10KiB apps and five photos are covered by host storage tests. Only the active app is loaded into RAM. Upload checks UTF-8/NUL/size in 256-byte blocks and does not compile apps; syntax/resource errors are reported on launch. Up to 64 names per UI list page-set; wipe iterates all batches.
 
 ## Native photographs and sleep
 

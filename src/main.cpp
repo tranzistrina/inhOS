@@ -1,4 +1,5 @@
 #include "Battery.h"
+#include "Book.h"
 #include "Files.h"
 #include "Ginh.h"
 #include "Glagol.h"
@@ -115,7 +116,8 @@ enum View {
   SleepPicker,
   FileManager,
   DeleteConfirm,
-  Usb
+  Usb,
+  Contents
 };
 View view = Home;
 std::string message;
@@ -154,15 +156,25 @@ void renderImage();
 bool loadPhoto(const String &path);
 void listFiles(const char *extension);
 bool removeUser(const String &path);
-struct Source : inh::TextSource {
-  File *f;
-  uint32_t size() const override { return f->size(); }
-  int byte(uint32_t p) override {
-    if (f->position() != p && !f->seek(p))
-      return -1;
-    return f->read();
-  }
-} source;
+#include "book_source.h"
+Source source;
+inh::BookLayout bookLayout;
+inh::ContentsState contents;
+inh::ChapterCursor indexChapters;
+void advanceChapter(uint32_t at) {
+  Source raw;
+  raw.reset(&book);
+  if (!indexChapters.advance(raw, bookLayout, at))
+    throw std::runtime_error("Повреждено оглавление");
+}
+bool readPageStart(uint32_t index, uint32_t &at) {
+  return index < pageCount &&
+         indexFile.seek(sizeof(inh::IndexHeader) + index * 4) &&
+         indexFile.read((uint8_t *)&at, 4) == 4 && at >= bookLayout.begin &&
+         at < bookLayout.end;
+}
+void openContents();
+void drawContents();
 void render();
 void openBook();
 void stopNetwork();
@@ -280,11 +292,11 @@ void drawReading() {
     text(4, 40, "Книга не загружена");
     return;
   }
-  indexFile.seek(sizeof(inh::IndexHeader) + page * 4);
-  uint32_t at;
-  if (indexFile.read((uint8_t *)&at, 4) != 4 || at > book.size())
+  uint32_t at, end = bookLayout.end;
+  if (!readPageStart(page, at) ||
+      (page + 1 < pageCount && !readPageStart(page + 1, end)))
     throw std::runtime_error("Повреждён индекс книги");
-  source.f = &book;
+  source.reset(&book, end);
   auto p = inh::paginate(source, at, cols, rows);
   int y = 13;
   for (auto &l : p.lines) {
@@ -292,6 +304,60 @@ void drawReading() {
     y += 12;
   }
   text(4, 119, std::to_string(page + 1) + " / " + std::to_string(pageCount));
+  text(112, 119, "4:огл.");
+}
+void openContents() {
+  uint32_t current = 0, selected = 0;
+  if (book && indexFile && readPageStart(page, current) &&
+      bookLayout.chapters) {
+    Source raw;
+    raw.reset(&book);
+    uint32_t cursor = inh::BookHeaderBytes;
+    for (uint32_t i = 0; i < bookLayout.chapters; ++i) {
+      inh::Chapter chapter;
+      if (!inh::nextChapter(raw, bookLayout, cursor, chapter))
+        throw std::runtime_error("Повреждено оглавление");
+      if (chapter.offset > current)
+        break;
+      selected = i;
+    }
+  }
+  contents.enter(page, bookLayout.chapters, selected);
+  view = Contents;
+  render();
+}
+void drawContents() {
+  text(4, 31,
+       "Оглавление" + (contents.count
+                           ? " " + std::to_string(contents.selection + 1) +
+                                 "/" + std::to_string(contents.count)
+                           : std::string()));
+  if (!contents.count) {
+    text(4, 53, "У этой книги нет оглавления.");
+    text(4, 72, "Загрузите FB2 новым загрузчиком.");
+  } else {
+    Source raw;
+    raw.reset(&book);
+    for (uint32_t i = (contents.selection / 4) * 4;
+         i < contents.count && i < (contents.selection / 4) * 4 + 4; ++i) {
+      inh::Chapter chapter;
+      if (!inh::chapterAt(raw, bookLayout, i, chapter))
+        throw std::runtime_error("Повреждено оглавление");
+      std::string label =
+          std::string(i == contents.selection ? "> " : "  ") +
+          std::string(std::min<unsigned>(chapter.depth, 3) * 2, ' ');
+      unsigned cells = label.size();
+      const unsigned char *p = (const unsigned char *)chapter.title;
+      while (*p && cells < 39) {
+        label += char(*p++);
+        while ((*p & 0xc0) == 0x80)
+          label += char(*p++);
+        ++cells;
+      }
+      text(4, 49 + (i % 4) * 16, label);
+    }
+  }
+  text(4, 119, "1:вниз 2:глава 3:вверх 4:назад");
 }
 void render() {
   canvas.fillScreen(0);
@@ -315,6 +381,8 @@ void render() {
         text(4, 30 + i * 15,
              std::string(i == selection ? "> " : "  ") + choices[i]);
       }
+    } else if (view == Contents) {
+      drawContents();
     } else if (view == Usb) {
       text(4, 35, "USB-файлы / 115200");
       text(4, 54,
@@ -386,9 +454,14 @@ void beginIndex() {
     return;
   }
   inh::IndexHeader h;
+  h.version = 2;
+  h.bookCrc = bookLayout.bodyCrc;
   h.bookSize = book.size();
   building.write((uint8_t *)&h, sizeof h);
-  buildOffset = pageCount = 0;
+  buildOffset = bookLayout.begin;
+  pageCount = 0;
+  indexChapters = inh::ChapterCursor{};
+  advanceChapter(buildOffset);
   message = "Разметка книги. Удержание: выход";
   view = Error;
   render();
@@ -401,10 +474,19 @@ void openBook() {
     error("Загрузите TXT или FB2 по Wi-Fi");
     return;
   }
+  Source raw;
+  raw.reset(&book);
+  if (!inh::parseBook(raw, bookLayout)) {
+    book.close();
+    error("Повреждена книга или оглавление");
+    return;
+  }
+  source.reset(&book, bookLayout.end);
   indexFile = LittleFS.open("/book.idx", "r");
   inh::IndexHeader h;
   if (indexFile && indexFile.read((uint8_t *)&h, sizeof h) == sizeof h &&
-      h.magic == 0x49484e32 && h.version == 1 && h.bookSize == book.size() &&
+      h.magic == 0x49484e32 && h.version == 2 &&
+      h.bookCrc == bookLayout.bodyCrc && h.bookSize == book.size() &&
       h.columns == cols && h.rows == rows && h.count && h.count <= 100000 &&
       indexFile.size() == sizeof h + h.count * 4) {
     pageCount = h.count;
@@ -426,10 +508,14 @@ void indexTick() {
       return;
     }
     pageCount++;
+    advanceChapter(buildOffset);
+    source.reset(&book, std::min(indexChapters.next, bookLayout.end));
     auto p = inh::paginate(source, buildOffset, cols, rows);
     buildOffset = p.next;
-    if (buildOffset >= book.size()) {
+    if (buildOffset >= bookLayout.end) {
       inh::IndexHeader h;
+      h.version = 2;
+      h.bookCrc = bookLayout.bodyCrc;
       h.bookSize = book.size();
       h.count = pageCount;
       building.seek(0);
@@ -594,7 +680,8 @@ void installRoutes() {
     json += INH_APPS ? "Apps" : "Reader";
     json += "\",\"apps\":";
     json += INH_APPS ? "true" : "false";
-    json += ",\"max_app_bytes\":32768,\"max_book_bytes\":3145728,\"max_image_"
+    json += ",\"book_toc\":1,\"max_app_bytes\":32768,\"max_book_bytes\":"
+            "3145728,\"max_image_"
             "bytes\":3833}";
     web.sendHeader("Cache-Control", "no-store");
     web.send(200, "application/json; charset=utf-8", json);
@@ -710,8 +797,18 @@ void installRoutes() {
       book.close();
       indexFile.close();
     }
-    if (destination == "/book.txt")
+    if (destination == "/book.txt") {
+      File f = LittleFS.open("/upload.tmp", "r");
+      Source raw;
+      raw.reset(&f);
+      inh::BookLayout layout;
+      if (!validSource(f) || !inh::parseBook(raw, layout)) {
+        web.send(400, "text/plain; charset=utf-8",
+                 "Повреждена книга или оглавление");
+        return;
+      }
       LittleFS.remove("/book.idx");
+    }
     if (!LittleFS.rename("/upload.tmp", destination)) {
       web.send(500);
       return;
@@ -950,6 +1047,34 @@ void gesture(inh::Gesture g) {
       exitUsb();
     return;
   }
+  if (view == Contents) {
+    if (g == inh::Gesture::Hold || g == inh::Gesture::Quadruple) {
+      page = contents.cancel();
+      view = Reading;
+      render();
+      return;
+    }
+    if (g == inh::Gesture::Single || g == inh::Gesture::Triple)
+      contents.move(g == inh::Gesture::Triple);
+    else if (g == inh::Gesture::Double && contents.count) {
+      Source raw;
+      raw.reset(&book);
+      inh::Chapter chapter;
+      uint32_t target;
+      if (!inh::chapterAt(raw, bookLayout, contents.selection, chapter) ||
+          !inh::pageForOffset(pageCount, chapter.offset, readPageStart, target))
+        throw std::runtime_error("Не удалось найти главу в индексе");
+      page = target;
+      savePage();
+      view = Reading;
+    }
+    render();
+    return;
+  }
+  if (view == Reading && g == inh::Gesture::Quadruple) {
+    openContents();
+    return;
+  }
   if (g == inh::Gesture::Hold) {
     if (!fsReady) {
       view = Format;
@@ -988,6 +1113,8 @@ void gesture(inh::Gesture g) {
   if (!fsReady)
     return;
   if (view == Application) {
+    if (g == inh::Gesture::Quadruple)
+      return;
     appInput = g == inh::Gesture::Single   ? 1
                : g == inh::Gesture::Double ? 2
                                            : 3;

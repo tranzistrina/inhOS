@@ -1,10 +1,11 @@
 // Native harness: executes the SAME framing/session/transfer engine as
 // firmware. Host filesystem adapter is a test double; it is not the ESP32
 // LittleFS driver.
+#include "Book.h"
 #include "Ginh.h"
 #include "UsbFs.h"
-#include <chrono>
 #include <cassert>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -30,9 +31,9 @@ struct Host final : Backend {
     return OK;
   }
   Status info(Packet &r) override {
-    return string(
-        r, "{\"protocol\":\"INHFS/"
-           "1\",\"version\":\"host-test\",\"free\":4000000,\"total\":5111808}");
+    return string(r, "{\"protocol\":\"INHFS/"
+                     "1\",\"version\":\"host-test\",\"book_toc\":1,\"free\":"
+                     "4000000,\"total\":5111808}");
   }
   Status list(uint32_t i, Packet &r) override {
     for (auto &e : fs::directory_iterator(root)) {
@@ -87,6 +88,24 @@ struct Host final : Backend {
         return Invalid;
     }
     if (!strcmp(p, "/book.txt")) {
+      struct BookSource : inh::TextSource {
+        std::ifstream &f;
+        uint32_t length;
+        BookSource(std::ifstream &in) : f(in) {
+          f.clear();
+          f.seekg(0, std::ios::end);
+          length = f.tellg();
+        }
+        uint32_t size() const override { return length; }
+        int byte(uint32_t at) override {
+          f.clear();
+          f.seekg(at);
+          return f.get();
+        }
+      } source(f);
+      inh::BookLayout layout;
+      if (!inh::parseBook(source, layout))
+        return Invalid;
       fs::remove(root / "book.idx");
       fs::remove(root / "book.idx.tmp");
     }
@@ -170,12 +189,21 @@ int main(int argc, char **argv) {
       size_t size = pack(q, bytes.data());
       server.receive(bytes.data(), size, now, [](const uint8_t *, size_t) {});
     };
-    q.op = Hello; q.seq = 1; q.size = 7;
-    memcpy(q.data.data(), "INHFS/1", 7); request(0);
+    q.op = Hello;
+    q.seq = 1;
+    q.size = 7;
+    memcpy(q.data.data(), "INHFS/1", 7);
+    request(0);
     assert(server.connected);
-    q = Packet{}; q.op = PutBegin; q.seq = 2; q.session = 112234; q.size = 14;
-    put32(q.data.data(), 10); put32(q.data.data() + 4, 123);
-    memcpy(q.data.data() + 8, "/a.inh", 6); request(1);
+    q = Packet{};
+    q.op = PutBegin;
+    q.seq = 2;
+    q.session = 112234;
+    q.size = 14;
+    put32(q.data.data(), 10);
+    put32(q.data.data() + 4, 123);
+    memcpy(q.data.data() + 8, "/a.inh", 6);
+    request(1);
     assert(fs::exists(host.root / "usb-upload.tmp"));
     server.tick(15002);
     assert(!fs::exists(host.root / "usb-upload.tmp"));

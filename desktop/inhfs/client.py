@@ -55,23 +55,9 @@ def prepare(source, directory):
         convert(source, out)
         return out, '/' + out.name
     if ext == '.fb2':
-        import xml.etree.ElementTree as ET
-        if source.stat().st_size > 16 * 1024 * 1024:
-            raise InhError('FB2 превышает 16 МиБ')
-        raw = source.read_bytes()
-        # Reject DTD/entities also in UTF-16 documents before parsing.
-        check = raw.replace(b'\x00', b'').upper()
-        if b'<!DOCTYPE' in check or b'<!ENTITY' in check:
-            raise InhError('DTD и сущности в FB2 запрещены')
-        root = ET.fromstring(raw)
-        paragraphs = []
-        for body in root.iter():
-            if body.tag.split('}')[-1] == 'body':
-                for el in body.iter():
-                    if el.tag.split('}')[-1] in ('p', 'v', 'subtitle'):
-                        paragraphs.append(''.join(el.itertext()))
+        from .books import convert as convert_book
         out = Path(directory) / 'book.txt'
-        out.write_text('\n'.join(paragraphs) + '\n', encoding='utf-8')
+        convert_book(source, out)
         return out, '/book.txt'
     if ext == '.txt':
         return source, '/book.txt'
@@ -197,6 +183,11 @@ class Client:
             self.cancel_event.clear()
             local, default = prepare(source, tmp)
             name = remote_path(remote or default)
+            if name == b'/book.txt':
+                with open(local, 'rb') as check:
+                    packaged = check.read(10) == b'INHBOOK/1\n'
+                if packaged and self.info().get('book_toc') != 1:
+                    raise InhError('Для оглавления FB2 нужна прошивка inhOS 0.4.0 или новее')
             total = local.stat().st_size
             if not total or total > (3145728 if name == b'/book.txt' else 32768):
                 raise InhError('Файл пуст или превышает допустимый размер')

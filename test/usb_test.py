@@ -240,6 +240,28 @@ class UsbTests(unittest.TestCase):
             self.assertEqual((self.root/'cli-out').read_bytes(),(self.root/'pty.inh').read_bytes())
         finally:
             live.close(False);stop.set();worker.join(2);os.close(master);os.close(slave)
+    def test_fb2_contents_round_trip(self):
+        from inhfs.books import from_fb2
+        xml=('<?xml version="1.0" encoding="windows-1251"?><FictionBook><body>'
+             '<section><title><p>Часть первая</p></title><p>Текст</p>'
+             '<section><title><p>Глава один</p></title><p>Конец</p></section>'
+             '</section></body></FictionBook>').encode('cp1251')
+        expected=from_fb2(xml)
+        self.client.upload(self.source('toc.fb2',xml))
+        self.client.download('/book.txt',self.root/'book-copy.txt')
+        self.assertEqual((self.root/'book-copy.txt').read_bytes(),expected)
+        report=subprocess.run([str(ROOT/'build/book_check'),str(self.root/'book-copy.txt')],capture_output=True,text=True,check=True)
+        import json
+        self.assertEqual(json.loads(report.stdout)['chapters'],2)
+        broken=bytearray(expected);broken[46]^=1
+        with self.assertRaises(InhError):self.client.upload(self.source('bad.txt',broken))
+        self.assertEqual((self.fs/'book.txt').read_bytes(),expected)
+        info=self.client.info
+        self.client.info=lambda:{'book_toc':0}
+        try:
+            with self.assertRaises(InhError):self.client.upload(self.root/'toc.fb2')
+        finally:self.client.info=info
+        self.assertEqual((self.fs/'book.txt').read_bytes(),expected)
     def test_firmware_timeout_state(self):
         subprocess.run([str(ROOT/'build/usb_host'),str(self.root/'timeout-device'),'--timeout-check'],check=True)
     def test_decoder_noise_overflow(self):

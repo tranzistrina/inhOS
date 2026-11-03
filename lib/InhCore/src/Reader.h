@@ -140,7 +140,7 @@ public:
     return true;
   }
 };
-enum class Gesture { None, Single, Double, Triple, Hold };
+enum class Gesture { None, Single, Double, Triple, Quadruple, Hold };
 class Button {
   bool raw_ = false, stable_ = false, held_ = false, armed_ = true;
   uint32_t changed_ = 0, pressed_ = 0, released_ = 0;
@@ -182,10 +182,11 @@ public:
       return Gesture::Hold;
     }
     if (!stable_ && clicks_ &&
-        (clicks_ >= 3 || uint32_t(now - released_) >= 360)) {
+        (clicks_ >= 4 || uint32_t(now - released_) >= 360)) {
       auto c = clicks_;
       clicks_ = 0;
-      return c >= 3   ? Gesture::Triple
+      return c >= 4   ? Gesture::Quadruple
+             : c == 3 ? Gesture::Triple
              : c == 2 ? Gesture::Double
                       : Gesture::Single;
     }
