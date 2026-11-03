@@ -25,6 +25,22 @@ int main(int argc, char **argv) {
   for (auto s : {"/../a.inh", "/a/b.inh", "/book.idx", "/upload.tmp",
                  "/.ginh/../", "/nvs", "//a.inh", "/a.inh?delete"})
     assert(!inh::userPath(s));
+  inh::SourceValidator utf8;
+  for (unsigned char c : std::string("аще истина:\n"))
+    assert(utf8.feed(c));
+  assert(utf8.complete());
+  for (auto bad : {std::string("\0", 1), std::string("\x80"),
+                   std::string("\xc0\xaf"), std::string("\xed\xa0\x80")}) {
+    inh::SourceValidator v;
+    bool valid = true;
+    for (unsigned char c : bad)
+      if (!v.feed(c))
+        valid = false;
+    assert(!valid || !v.complete());
+  }
+  inh::SourceValidator truncated;
+  assert(truncated.feed(0xe2));
+  assert(!truncated.complete());
   // Actual queue dedup predicate and sleep gate: one final refresh, no sleep
   // while held or busy.
   uint32_t shown = 9, target = 10;

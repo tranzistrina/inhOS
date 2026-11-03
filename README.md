@@ -21,7 +21,7 @@ First installation from unrelated firmware uses the bundled merged first-install
 
 ## Upload and manage
 
-Join Wi-Fi `inhOS` / password `inhreader`, open http://192.168.4.1 in a full browser. Upload TXT/FB2, .inh, .ginh; file list and confirmed delete actions are in the same portal. FB2 text conversion is in the browser; XML formatting/images/footnotes are not preserved. One current book up to 3MiB, app source up to 32KiB (complex programs may be rejected by resource limits), native image exactly 3833 bytes. User filenames normalize to ASCII. At least eight 10KiB apps and five photos are covered by host storage tests. Only the active app is loaded into RAM. Up to 64 names per UI list page-set; wipe iterates all batches.
+Join Wi-Fi `inhOS` / password `inhreader`, open http://192.168.4.1 in a full browser. Upload TXT/FB2, .inh, .ginh; file list and confirmed delete actions are in the same portal. FB2 text conversion is in the browser; XML formatting/images/footnotes are not preserved. One current book up to 3MiB, app source up to 32KiB (complex programs may be rejected by resource limits), native image exactly 3833 bytes. User filenames normalize to ASCII. At least eight 10KiB apps and five photos are covered by host storage tests. Only the active app is loaded into RAM. Upload checks UTF-8/NUL/size in 256-byte blocks and does not compile apps; syntax/resource errors are reported on launch. Up to 64 names per UI list page-set; wipe iterates all batches.
 
 ## Native photographs and sleep
 

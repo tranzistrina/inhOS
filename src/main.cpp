@@ -388,9 +388,26 @@ void memoryError() {
   font.print("Недостаточно RAM. Приложение остановлено.");
   frame();
 }
+bool validSource(File &f) {
+  if (!f || !f.seek(0))
+    return false;
+  inh::SourceValidator validator;
+  uint8_t chunk[256];
+  while (f.available()) {
+    size_t count = f.read(chunk, sizeof chunk);
+    if (!count)
+      return false;
+    for (size_t i = 0; i < count; i++)
+      if (!validator.feed(chunk[i]))
+        return false;
+  }
+  return validator.complete() && f.seek(0);
+}
 std::string appSource(File &f) {
   if (!f || f.size() > 32768)
     throw std::runtime_error("Файл приложения повреждён/слишком велик");
+  if (!validSource(f))
+    throw std::runtime_error("Приложение должно быть UTF-8 без NUL");
   std::string out(f.size(), '\0');
   if (f.read((uint8_t *)out.data(), out.size()) != out.size())
     throw std::runtime_error("Ошибка чтения приложения");
@@ -596,14 +613,10 @@ void installRoutes() {
     incoming.close();
     receiving = false;
     if (destination.endsWith(".inh")) {
-      File f = LittleFS.open("/upload.tmp");
-      try {
-        vm.stop();
-        auto source = appSource(f);
-        f.close();
-        auto p = compileApp(source);
-      } catch (const std::exception &e) {
-        web.send(400, "text/plain; charset=utf-8", e.what());
+      File f = LittleFS.open("/upload.tmp", "r");
+      if (!validSource(f)) {
+        web.send(400, "text/plain; charset=utf-8",
+                 "Исходник должен быть UTF-8 без NUL");
         return;
       }
     } else if (destination.endsWith(".ginh")) {
