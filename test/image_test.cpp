@@ -20,6 +20,7 @@ int main(int argc, char **argv) {
     assert(!inh::decodeGinh(b.data(), n, p));
   b.push_back(0);
   assert(!inh::decodeGinh(b.data(), b.size(), p));
+  assert(inh::userPath("/OldApp.inh"));
   assert(inh::userPath("/a.inh") && inh::userPath("/a.ginh") &&
          inh::userPath("/book.txt"));
   for (auto s : {"/../a.inh", "/a/b.inh", "/book.idx", "/upload.tmp",

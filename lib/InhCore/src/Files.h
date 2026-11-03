@@ -56,8 +56,9 @@ inline bool userPath(const std::string &p) {
   if (!suffix(p, ".inh") && !suffix(p, ".ginh"))
     return false;
   for (size_t i = 1; i < p.size(); i++)
-    if (!((p[i] >= 'a' && p[i] <= 'z') || (p[i] >= '0' && p[i] <= '9') ||
-          p[i] == '_' || p[i] == '-' || p[i] == '.'))
+    if (!((p[i] >= 'a' && p[i] <= 'z') || (p[i] >= 'A' && p[i] <= 'Z') ||
+          (p[i] >= '0' && p[i] <= '9') || p[i] == '_' || p[i] == '-' ||
+          p[i] == '.'))
       return false;
   return true;
 }
