@@ -16,3 +16,4 @@ ${CXX:-g++} -std=c++17 -O2 -Wall -Wextra -Wpedantic -fsanitize=${SANITIZERS:-add
 # RSS must be measured without ASan's deliberate freed-block quarantine.
 ${CXX:-g++} -std=c++17 -O2 -Wall -Wextra -Wpedantic -Ilib/InhCore/src test/usb_host.cpp -o build/usb_host_profile
 ${CXX:-g++} -std=c++17 -O2 -Wall -Wextra -Wpedantic -fsanitize=${SANITIZERS:-address,undefined} -Ilib/InhCore/src test/book_check.cpp -o build/book_check
+${CXX:-g++} -std=c++17 -O2 -Wall -Wextra -Wpedantic -fsanitize=${SANITIZERS:-address,undefined} -Ilib/InhCore/src test/plain_contents_check.cpp -o build/plain_contents_check

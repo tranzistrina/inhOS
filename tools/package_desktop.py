@@ -17,5 +17,5 @@ with zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED) as z:
         z.writestr(info,data)
     z.write(root/'docs/FB2-TOC.md','inhOS-USB/FB2-TOC.md')
     z.write(root/'docs/INHFS-1.md','inhOS-USB/INHFS-1.md')
-    z.write(root/'docs/VERIFICATION-0.4.0.md','inhOS-USB/VERIFICATION-0.4.0.md')
+    z.write(root/'docs/VERIFICATION-0.4.1.md','inhOS-USB/VERIFICATION-0.4.1.md')
 print(out,hashlib.sha256(out.read_bytes()).hexdigest())

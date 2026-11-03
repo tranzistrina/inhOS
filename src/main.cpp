@@ -4,6 +4,7 @@
 #include "Ginh.h"
 #include "Glagol.h"
 #include "Orientation.h"
+#include "PlainContents.h"
 #include "Reader.h"
 #include "SleepGate.h"
 #include "default_sleep.h"
@@ -159,6 +160,11 @@ bool removeUser(const String &path);
 #include "book_source.h"
 Source source;
 inh::BookLayout bookLayout;
+inh::PlainContents plainContents;
+bool readChapter(inh::TextSource &raw, uint32_t index, inh::Chapter &chapter) {
+  return bookLayout.packaged ? inh::chapterAt(raw, bookLayout, index, chapter)
+                             : plainContents.chapterAt(raw, index, chapter);
+}
 inh::ContentsState contents;
 inh::ChapterCursor indexChapters;
 void advanceChapter(uint32_t at) {
@@ -312,10 +318,9 @@ void openContents() {
       bookLayout.chapters) {
     Source raw;
     raw.reset(&book);
-    uint32_t cursor = inh::BookHeaderBytes;
     for (uint32_t i = 0; i < bookLayout.chapters; ++i) {
       inh::Chapter chapter;
-      if (!inh::nextChapter(raw, bookLayout, cursor, chapter))
+      if (!readChapter(raw, i, chapter))
         throw std::runtime_error("Повреждено оглавление");
       if (chapter.offset > current)
         break;
@@ -333,15 +338,15 @@ void drawContents() {
                                  "/" + std::to_string(contents.count)
                            : std::string()));
   if (!contents.count) {
-    text(4, 53, "У этой книги нет оглавления.");
-    text(4, 72, "Загрузите FB2 новым загрузчиком.");
+    text(4, 53, "Заголовки глав не найдены.");
+    text(4, 72, "4 клика / удержание: к книге");
   } else {
     Source raw;
     raw.reset(&book);
     for (uint32_t i = (contents.selection / 4) * 4;
          i < contents.count && i < (contents.selection / 4) * 4 + 4; ++i) {
       inh::Chapter chapter;
-      if (!inh::chapterAt(raw, bookLayout, i, chapter))
+      if (!readChapter(raw, i, chapter))
         throw std::runtime_error("Повреждено оглавление");
       std::string label =
           std::string(i == contents.selection ? "> " : "  ") +
@@ -480,6 +485,14 @@ void openBook() {
     book.close();
     error("Повреждена книга или оглавление");
     return;
+  }
+  if (!bookLayout.packaged) {
+    if (!plainContents.scan(raw, [] { yield(); })) {
+      book.close();
+      error("Ошибка чтения заголовков TXT");
+      return;
+    }
+    bookLayout.chapters = plainContents.count;
   }
   source.reset(&book, bookLayout.end);
   indexFile = LittleFS.open("/book.idx", "r");
@@ -1061,7 +1074,7 @@ void gesture(inh::Gesture g) {
       raw.reset(&book);
       inh::Chapter chapter;
       uint32_t target;
-      if (!inh::chapterAt(raw, bookLayout, contents.selection, chapter) ||
+      if (!readChapter(raw, contents.selection, chapter) ||
           !inh::pageForOffset(pageCount, chapter.offset, readPageStart, target))
         throw std::runtime_error("Не удалось найти главу в индексе");
       page = target;

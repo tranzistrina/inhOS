@@ -1,10 +1,10 @@
-# inhOS 0.4.0-alpha — Heltec Wireless Paper V1.2
+# inhOS 0.4.1-alpha — Heltec Wireless Paper V1.2
 
-Reader, Glagol applications and native GINH photographs on ESP32-S3, 250x122, one GPIO0 button. **Hardware testing not performed.** See [verification report](docs/VERIFICATION-0.4.0.md) for USB/battery test boundaries and pending device checks; [0.2.0 report](docs/VERIFICATION-0.2.0.md) contains host memory measurements.
+Reader, Glagol applications and native GINH photographs on ESP32-S3, 250x122, one GPIO0 button. **Hardware testing not performed.** See [verification report](docs/VERIFICATION-0.4.1.md) for USB/battery test boundaries and pending device checks; [0.2.0 report](docs/VERIFICATION-0.2.0.md) contains host memory measurements.
 
 ## Downloads and update
 
-[Complete firmware/source/converter archive](downloads/inhOS-0.4.0-alpha.zip) is published by CI only after successful tests/builds. SHA-256 files are beside it and inside the archive. For V1.2 use `firmware/apps_v12/firmware.bin`.
+[Complete firmware/source/converter archive](downloads/inhOS-0.4.1-alpha.zip) is published by CI only after successful tests/builds. SHA-256 files are beside it and inside the archive. For V1.2 use `firmware/apps_v12/firmware.bin`.
 
 **Updating existing inhOS 0.1.x / 0.2.x / 0.3.x:** write only this firmware.bin at **0x10000**, with the flash erase-all option disabled. `partitions.csv` is unchanged: 8MB flash, app 0x10000/0x300000, LittleFS 0x310000/0x4e0000. Saved books/apps/photos/NVS are preserved by this update. Do NOT use FIRST_INSTALL_0x0 for an ordinary update. Save a backup before flashing.
 
@@ -19,11 +19,13 @@ First installation from unrelated firmware uses the bundled merged first-install
 - Settings: orientation, sleep photograph (including built-in), file manager, reset reading position.
 - File manager: individual .inh/.ginh, book with indices, or all user files. Confirmation defaults to CANCEL; one click changes choice, double accepts, triple/hold cancels. File removal never requires reflashing or erase_flash. Orientation and chosen sleep image persist in NVS.
 
-## FB2 contents (0.4.0)
+## FB2 and existing TXT contents (0.4.1)
 
-[Русская инструкция по оглавлению](docs/FB2-TOC.md). In the reader: four clicks open contents. One click moves down, triple moves up, double opens the selected chapter, four clicks or hold cancel to the exact original page. Chapter starts become page boundaries. Triple-click actions now wait for the normal 360ms inter-click timeout so the fourth click can be distinguished. The reader footer shows `4:огл.`; battery/orientation are unchanged.
+[Русская инструкция по оглавлению](docs/FB2-TOC.md). In the reader: four clicks open contents. One click moves down, triple moves up, double opens the selected chapter, four clicks or hold cancel to the exact original page. Embedded FB2 contents have chapter-aligned pages. Existing plain TXT retains its original page boundaries and bookmarks; selecting a detected heading opens its containing page. Triple-click actions now wait for the normal 360ms inter-click timeout so the fourth click can be distinguished. The reader footer shows `4:огл.`; battery/orientation are unchanged.
 
-Re-upload existing FB2 using the updated Wi-Fi portal or 0.4.0 desktop client: older converters discarded section structure, which cannot be reconstructed reliably. Plain TXT keeps working and shows a no-contents message. XML-declared encodings (including Windows-1251) are auto-detected for FB2. Contents and UTF-8 text live in one checksummed `INHBOOK/1` envelope at `/book.txt`, so atomic USB/Wi-Fi replacement, download/backup and deletion stay single-file operations. No new user-accessible paths or partition changes. Existing page indexes rebuild once; plain TXT reading position remains saved.
+Already-stored plain TXT is now scanned on-device for chapter headings, including `Часть 1`, `Глава I`, prologue/epilogue/interlude, `1.01` and numeric/Roman chapter labels. No re-upload, extra flash space or book rewrite is needed. Detection is heuristic: arbitrary FB2-only structure cannot be recovered from flattened text. The supplied legacy TXT yielded all 89 headings with no extras; its 5309-page layout stayed unchanged. Up to 1024 byte offsets use a fixed 4KiB array, without heap allocation or storing the whole book in RAM. Individual numbers are ignored unless other headings of that numeric style occur.
+
+New FB2 conversion still preserves an exact table, including arbitrary section titles, in the checksummed INHBOOK/1 envelope at `/book.txt`. XML-declared encodings (including Windows-1251) are auto-detected. Ordinary TXT and the precise FB2 envelope are both supported by the same contents menu. Battery, orientation, atomic uploads and partition layout remain unchanged.
 
 ## USB file manager (introduced in 0.3.0)
 
