@@ -1,10 +1,10 @@
-# inhOS 0.2.0-alpha — Heltec Wireless Paper V1.2
+# inhOS 0.2.1-alpha — Heltec Wireless Paper V1.2
 
-Reader, Glagol applications and native GINH photographs on ESP32-S3, 250x122, one GPIO0 button. **Hardware testing not performed.** See [verification report](docs/VERIFICATION-0.2.0.md) for measured host memory reductions, test boundaries and pending device checks.
+Reader, Glagol applications and native GINH photographs on ESP32-S3, 250x122, one GPIO0 button. **Hardware testing not performed.** See [verification report](docs/VERIFICATION-0.2.1.md) for battery test boundaries and pending device checks; [0.2.0 report](docs/VERIFICATION-0.2.0.md) contains host memory measurements.
 
 ## Downloads and update
 
-[Complete firmware/source/converter archive](downloads/inhOS-0.2.0-alpha.zip) is published by CI only after successful tests/builds. SHA-256 files are beside it and inside the archive. For V1.2 use `firmware/apps_v12/firmware.bin`.
+[Complete firmware/source/converter archive](downloads/inhOS-0.2.1-alpha.zip) is published by CI only after successful tests/builds. SHA-256 files are beside it and inside the archive. For V1.2 use `firmware/apps_v12/firmware.bin`.
 
 **Updating existing inhOS 0.1.x:** write only this firmware.bin at **0x10000**, with the flash erase-all option disabled. `partitions.csv` is unchanged: 8MB flash, app 0x10000/0x300000, LittleFS 0x310000/0x4e0000. Saved books/apps/photos/NVS are preserved by this update. Do NOT use FIRST_INSTALL_0x0 for an ordinary update. Save a backup before flashing.
 
@@ -18,6 +18,14 @@ First installation from unrelated firmware uses the bundled merged first-install
 - Photos: double opens; single in viewer next image; triple back; double in viewer opens delete confirmation.
 - Settings: orientation, sleep photograph (including built-in), file manager, reset reading position.
 - File manager: individual .inh/.ginh, book with indices, or all user files. Confirmation defaults to CANCEL; one click changes choice, double accepts, triple/hold cancels. File removal never requires reflashing or erase_flash. Orientation and chosen sleep image persist in NVS.
+
+## Battery indicator
+
+Every device menu has a battery icon and percentage at the top right. The reader has it on the page-counter line. Measurement runs once at boot, before Wi-Fi starts, and at most once per minute in menus/reader; unchanged percentages do not refresh E-Ink or reset the sleep timer. Photos, sleep images and app graphics remain unmodified. With Wi-Fi active the last measurement is marked `~`; `--%` means no valid measurement. The single-cell LiPo voltage curve gives an approximate percentage, affected by load, temperature and USB charging. It does not detect charging or reliably detect an absent battery.
+
+Wireless Paper uses GPIO19 LOW to enable its 10K/10K divider, GPIO20/ADC2 channel 9 to read it, then GPIO19 HIGH to disable it. ADC2 is not sampled with Wi-Fi running. Native USB CDC is disabled because GPIO19/20 are used by the battery circuit; the board's CP2102 USB-UART is used for serial logs. Calibration uses the ESP-IDF ADC calibration API; the divider/percentage accuracy still needs measurement on a physical board. [Heltec schematic](https://resource.heltec.cn/download/Wireless_Paper/Wireless_Paper_V0.4_Schematic_Diagram.pdf), [board pin definitions](https://github.com/adafruit/circuitpython/blob/main/ports/espressif/boards/heltec_wireless_paper/pins.c).
+
+`http://192.168.4.1/diagnostics` reports `battery_mv`, `battery_percent` (null on failure), `battery_age_ms` and `battery_cached_wifi`; querying it does not force an ADC reading or interrupt Wi-Fi.
 
 ## Upload and manage
 
@@ -43,6 +51,6 @@ python3 test/converter_test.py
 
 For restricted hosts without ASan support: `SANITIZERS=undefined ./tools/test.sh`. CI uses ASan/UBSan for the core test. Profiling executable tracks host requested heap separately. Run `tools/device_check.py` only with an actual device connected to its AP; it has NOT been run on hardware here.
 
-Reader-only and V1.1 variants remain build targets. V1.2/V1.1.1 use E0213A367; V1.1 uses LCMEN2R13EFC1. V1.0 unsupported. Old `.knigo`, battery display, full Python/CPython, classes/imports and Wi-Fi STA remain unsupported. The language is Cyrillic/Python-like, not historically exact Church Slavonic. [Language reference](docs/LANGUAGE.md).
+Reader-only and V1.1 variants remain build targets. V1.2/V1.1.1 use E0213A367; V1.1 uses LCMEN2R13EFC1. V1.0 unsupported. Old `.knigo`, full Python/CPython, classes/imports and Wi-Fi STA remain unsupported. The language is Cyrillic/Python-like, not historically exact Church Slavonic. [Language reference](docs/LANGUAGE.md).
 
 New source implementation; no original KniGO code/images copied. Earlier binary analysis prevents calling the process a strict clean-room implementation. GPL-3.0 and [dependency notices](docs/DEPENDENCIES.md) apply.

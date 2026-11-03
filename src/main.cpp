@@ -1,3 +1,4 @@
+#include "Battery.h"
 #include "Files.h"
 #include "Ginh.h"
 #include "Glagol.h"
@@ -15,7 +16,9 @@
 #include <WiFi.h>
 #include <atomic>
 #include <cmath>
+#include <driver/adc.h>
 #include <driver/rtc_io.h>
+#include <esp_adc_cal.h>
 #include <esp_heap_caps.h>
 #include <esp_sleep.h>
 #include <heltec-eink-modules.h>
@@ -49,6 +52,43 @@ std::atomic<bool> displayBusy{false}, displayFault{false};
 std::atomic<uint32_t> sent{0}, shown{0};
 uint32_t activeAt = 0, appWake = 0;
 bool fsReady = false, wifiOn = false;
+// Wireless Paper: ADC_CTRL GPIO19 LOW enables a 10K/10K divider on GPIO20.
+// USB is CP2102/UART0 on this board, not native USB on GPIO19/20.
+inh::Battery battery;
+esp_adc_cal_characteristics_t batteryCalibration;
+bool batteryAdcReady = false;
+void sampleBattery(bool force = false) {
+  if (wifiOn || (!force && !battery.due(millis(), wifiOn)))
+    return; // ADC2 belongs to Wi-Fi while AP is running; keep last value.
+  std::array<unsigned, 9> samples{};
+  bool ok = batteryAdcReady;
+  digitalWrite(19, LOW);
+  delay(3);
+  for (auto &mv : samples) {
+    int raw = 0;
+    if (!batteryAdcReady ||
+        adc2_get_raw(ADC2_CHANNEL_9, ADC_WIDTH_BIT_12, &raw) != ESP_OK ||
+        raw <= 0 || raw >= 4095) {
+      ok = false;
+      continue;
+    }
+    mv = 2 * esp_adc_cal_raw_to_voltage(raw, &batteryCalibration);
+    delayMicroseconds(100);
+  }
+  digitalWrite(19, HIGH); // Do not leave the divider enabled between samples.
+  battery.update(millis(), samples, ok);
+}
+void beginBattery() {
+  rtc_gpio_hold_dis(GPIO_NUM_19);
+  rtc_gpio_deinit(GPIO_NUM_19);
+  digitalWrite(19, HIGH);
+  pinMode(19, OUTPUT);
+  batteryAdcReady =
+      adc2_config_channel_atten(ADC2_CHANNEL_9, ADC_ATTEN_DB_11) == ESP_OK;
+  esp_adc_cal_characterize(ADC_UNIT_2, ADC_ATTEN_DB_11, ADC_WIDTH_BIT_12, 1100,
+                           &batteryCalibration);
+  sampleBattery(true);
+}
 unsigned selection = 0, settingSelection = 0;
 bool flipped = true, pendingFlipped = true;
 int appInput = 0;
@@ -117,6 +157,18 @@ void stopNetwork();
 void text(int x, int y, const std::string &s) {
   font.setCursor(x, y);
   font.print(s.c_str());
+}
+void drawBattery(int baseline) {
+  char label[8];
+  battery.label(label, wifiOn);
+  font.setForegroundColor(1);
+  font.setBackgroundColor(0);
+  canvas.drawRect(190, baseline - 9, 18, 9, 1);
+  canvas.fillRect(208, baseline - 7, 2, 5, 1);
+  if (battery.percent >= 0)
+    canvas.fillRect(192, baseline - 7, battery.percent * 14 / 100, 5, 1);
+  font.setCursor(214, baseline);
+  font.print(label);
 }
 void frame() {
   xSemaphoreTake(frameMutex, portMAX_DELAY);
@@ -300,6 +352,7 @@ void render() {
       }
     }
   }
+  drawBattery(view == Reading ? 119 : 13);
   frame();
 }
 void beginIndex() {
@@ -386,6 +439,7 @@ void memoryError() {
   canvas.fillScreen(0);
   font.setCursor(4, 35);
   font.print("Недостаточно RAM. Приложение остановлено.");
+  drawBattery(13);
   frame();
 }
 bool validSource(File &f) {
@@ -495,6 +549,7 @@ bool receiving = false;
 void network() {
   if (wifiOn)
     return;
+  sampleBattery(true);
   WiFi.mode(WIFI_AP);
   WiFi.softAP("inhOS", "inhreader");
   dns.start(53, "*", WiFi.softAPIP());
@@ -719,12 +774,19 @@ void installRoutes() {
   });
   web.on("/diagnostics", HTTP_GET, [] {
     auto h = heapSample();
-    String data = "{\"free\":" + String(h.free) +
-                  ",\"minimum_since_boot\":" + String(h.minimum) +
-                  ",\"largest\":" + String(h.largest) +
-                  ",\"compile_before\":" + String(compileBefore.free) +
-                  ",\"compile_after\":" + String(compileAfter.free) +
-                  ",\"run_after\":" + String(runAfter.free) + "}";
+    String data =
+        "{\"free\":" + String(h.free) +
+        ",\"minimum_since_boot\":" + String(h.minimum) +
+        ",\"largest\":" + String(h.largest) +
+        ",\"compile_before\":" + String(compileBefore.free) +
+        ",\"compile_after\":" + String(compileAfter.free) +
+        ",\"run_after\":" + String(runAfter.free) +
+        ",\"battery_mv\":" + String(battery.millivolts) +
+        ",\"battery_percent\":" +
+        (battery.percent < 0 ? String("null") : String(battery.percent)) +
+        ",\"battery_age_ms\":" +
+        String(uint32_t(millis() - battery.attemptedAt)) +
+        ",\"battery_cached_wifi\":" + (wifiOn ? "true" : "false") + "}";
     web.send(200, "application/json", data);
   });
   web.onNotFound([] {
@@ -790,6 +852,7 @@ inh::Value host(const std::string &n, const std::vector<inh::Value> &a) {
     if (ssid.length() < 1 || ssid.length() > 32 || password.length() < 8 ||
         password.length() > 63)
       throw std::runtime_error("SSID 1..32, пароль 8..63");
+    sampleBattery(true);
     WiFi.mode(WIFI_AP);
     if (!WiFi.softAP(ssid.c_str(), password.c_str()))
       throw std::runtime_error("ошибка Wi-Fi");
@@ -837,6 +900,7 @@ void sleepNow() {
   while (!gate.ready(shown, displayBusy, digitalRead(0) == LOW, millis()))
     delay(5);
   esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+  digitalWrite(19, HIGH);
   Platform::prepareToSleep();
   // Platform driver powers peripherals down; GPIO0 must remain RTC
   // input/pull-up.
@@ -848,6 +912,11 @@ void sleepNow() {
     return;
   Serial.println("SLEEP ready; wake GPIO0 only");
   Serial.flush();
+  // Keep the divider disabled while digital GPIOs power down in deep sleep.
+  rtc_gpio_init(GPIO_NUM_19);
+  rtc_gpio_set_level(GPIO_NUM_19, 1);
+  rtc_gpio_set_direction(GPIO_NUM_19, RTC_GPIO_MODE_OUTPUT_ONLY);
+  rtc_gpio_hold_en(GPIO_NUM_19);
   esp_deep_sleep_start();
 }
 void gesture(inh::Gesture g) {
@@ -1047,6 +1116,7 @@ void gesture(inh::Gesture g) {
 }
 void setup() {
   Serial.begin(115200);
+  beginBattery();
   rtc_gpio_deinit(GPIO_NUM_0);
   pinMode(0, INPUT_PULLUP);
   prefs.begin("inhOS", false);
@@ -1084,6 +1154,14 @@ void loop() {
       vm.tick(1);
       if (!vm.running() && !vm.error().empty())
         error(vm.error());
+    }
+    if (view != Application && view != PhotoView &&
+        battery.due(millis(), wifiOn)) {
+      int previous = battery.percent;
+      sampleBattery();
+      // Never update E-Ink on an unchanged reading or postpone idle sleep.
+      if (previous != battery.percent)
+        render();
     }
     if (fsReady && !wifiOn && !indexing && view != Application &&
         millis() - activeAt > 120000)
