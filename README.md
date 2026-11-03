@@ -1,12 +1,12 @@
-# inhOS 0.2.1-alpha — Heltec Wireless Paper V1.2
+# inhOS 0.3.0-alpha — Heltec Wireless Paper V1.2
 
-Reader, Glagol applications and native GINH photographs on ESP32-S3, 250x122, one GPIO0 button. **Hardware testing not performed.** See [verification report](docs/VERIFICATION-0.2.1.md) for battery test boundaries and pending device checks; [0.2.0 report](docs/VERIFICATION-0.2.0.md) contains host memory measurements.
+Reader, Glagol applications and native GINH photographs on ESP32-S3, 250x122, one GPIO0 button. **Hardware testing not performed.** See [verification report](docs/VERIFICATION-0.3.0.md) for USB/battery test boundaries and pending device checks; [0.2.0 report](docs/VERIFICATION-0.2.0.md) contains host memory measurements.
 
 ## Downloads and update
 
-[Complete firmware/source/converter archive](downloads/inhOS-0.2.1-alpha.zip) is published by CI only after successful tests/builds. SHA-256 files are beside it and inside the archive. For V1.2 use `firmware/apps_v12/firmware.bin`.
+[Complete firmware/source/converter archive](downloads/inhOS-0.3.0-alpha.zip) is published by CI only after successful tests/builds. SHA-256 files are beside it and inside the archive. For V1.2 use `firmware/apps_v12/firmware.bin`.
 
-**Updating existing inhOS 0.1.x:** write only this firmware.bin at **0x10000**, with the flash erase-all option disabled. `partitions.csv` is unchanged: 8MB flash, app 0x10000/0x300000, LittleFS 0x310000/0x4e0000. Saved books/apps/photos/NVS are preserved by this update. Do NOT use FIRST_INSTALL_0x0 for an ordinary update. Save a backup before flashing.
+**Updating existing inhOS 0.1.x / 0.2.x:** write only this firmware.bin at **0x10000**, with the flash erase-all option disabled. `partitions.csv` is unchanged: 8MB flash, app 0x10000/0x300000, LittleFS 0x310000/0x4e0000. Saved books/apps/photos/NVS are preserved by this update. Do NOT use FIRST_INSTALL_0x0 for an ordinary update. Save a backup before flashing.
 
 First installation from unrelated firmware uses the bundled merged first-install image at 0x0 and the on-device explicit format confirmation. This is separate from updating inhOS. No automatic format on mount failure.
 
@@ -18,6 +18,10 @@ First installation from unrelated firmware uses the bundled merged first-install
 - Photos: double opens; single in viewer next image; triple back; double in viewer opens delete confirmation.
 - Settings: orientation, sleep photograph (including built-in), file manager, reset reading position.
 - File manager: individual .inh/.ginh, book with indices, or all user files. Confirmation defaults to CANCEL; one click changes choice, double accepts, triple/hold cancels. File removal never requires reflashing or erase_flash. Orientation and chosen sleep image persist in NVS.
+
+## USB file manager (0.3.0)
+
+[Русская инструкция и готовые клиенты](desktop/README-RU.md), [INHFS/1 protocol](docs/INHFS-1.md). On the device select Settings → USB-файлы, then open the Windows/macOS client. CP2102 UART0, 115200 baud, native USB CDC disabled. Wi-Fi/app/indexing stop during the session; Deep-sleep is inhibited. Triple-click or hold exits. USB mode survives a reset on port open; a disconnected idle session drops after 60 seconds, but the device waits in USB mode until button exit/reconnect. File transfers time out after 15 seconds without valid packets. GUI Disconnect returns to normal mode. Existing file data is replaced atomically only after validation; enough free space for the entire temporary copy is required.
 
 ## Battery indicator
 

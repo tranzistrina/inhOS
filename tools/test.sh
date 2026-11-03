@@ -12,3 +12,4 @@ ${CXX:-g++} -std=c++17 -Ilib/InhCore/src lib/InhCore/src/Glagol.cpp test/memory_
 ./build/memory_profile examples/01_geometry.inh
 ${CXX:-g++} -std=c++17 -Wall -Wextra -Wpedantic -fsanitize=${SANITIZERS:-address,undefined} -Ilib/InhCore/src test/battery_test.cpp -o build/battery_test
 ASAN_OPTIONS=detect_leaks=1 ./build/battery_test
+${CXX:-g++} -std=c++17 -O2 -Wall -Wextra -Wpedantic -fsanitize=${SANITIZERS:-address,undefined} -Ilib/InhCore/src test/usb_host.cpp -o build/usb_host

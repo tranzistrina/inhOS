@@ -52,6 +52,15 @@ std::atomic<bool> displayBusy{false}, displayFault{false};
 std::atomic<uint32_t> sent{0}, shown{0};
 uint32_t activeAt = 0, appWake = 0;
 bool fsReady = false, wifiOn = false;
+std::atomic<bool> usbActive{false};
+bool usbConnected = false;
+SemaphoreHandle_t serialMutex;
+template <class F> void debugLog(F write) {
+  xSemaphoreTake(serialMutex, portMAX_DELAY);
+  if (!usbActive)
+    write();
+  xSemaphoreGive(serialMutex);
+}
 // Wireless Paper: ADC_CTRL GPIO19 LOW enables a 10K/10K divider on GPIO20.
 // USB is CP2102/UART0 on this board, not native USB on GPIO19/20.
 inh::Battery battery;
@@ -105,7 +114,8 @@ enum View {
   PhotoView,
   SleepPicker,
   FileManager,
-  DeleteConfirm
+  DeleteConfirm,
+  Usb
 };
 View view = Home;
 std::string message;
@@ -126,9 +136,11 @@ HeapSample heapSample() {
           uint32_t(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT))};
 }
 void logHeap(const char *phase, HeapSample h) {
-  Serial.printf("HEAP %s free=%lu minimum_since_boot=%lu largest=%lu\n", phase,
-                (unsigned long)h.free, (unsigned long)h.minimum,
-                (unsigned long)h.largest);
+  debugLog([&] {
+    Serial.printf("HEAP %s free=%lu minimum_since_boot=%lu largest=%lu\n",
+                  phase, (unsigned long)h.free, (unsigned long)h.minimum,
+                  (unsigned long)h.largest);
+  });
 }
 
 File book, indexFile, building;
@@ -200,11 +212,13 @@ void displayWorker(void *) {
             const auto point = inh::orientPixel(x, y, localFlipped);
             screen.drawPixel(point.x, point.y, BLACK);
           }
-      Serial.printf("EPD update seq=%lu\n", (unsigned long)version);
+      debugLog([&] {
+        Serial.printf("EPD update seq=%lu\n", (unsigned long)version);
+      });
       screen.update();
       shown = version;
     } catch (const std::exception &e) {
-      Serial.println(e.what());
+      debugLog([&] { Serial.println(e.what()); });
       displayFault = true;
     }
     displayBusy = false;
@@ -301,12 +315,19 @@ void render() {
         text(4, 30 + i * 15,
              std::string(i == selection ? "> " : "  ") + choices[i]);
       }
+    } else if (view == Usb) {
+      text(4, 35, "USB-файлы / 115200");
+      text(4, 54,
+           usbConnected ? "Компьютер подключён" : "Ожидание подключения ПК");
+      text(4, 75, "Wi-Fi выключен. Сон запрещён.");
+      text(4, 100, "3 клика / удержание: выход");
     } else if (view == Settings) {
-      const std::string choices[] = {
-          std::string("Разворот 180: ") + (flipped ? "вкл." : "выкл."),
-          "Фото для сна", "Управление файлами", "Сброс позиции книги"};
-      for (unsigned i = 0; i < 4; i++)
-        text(4, 34 + i * 17,
+      const std::string choices[] = {std::string("Разворот 180: ") +
+                                         (flipped ? "вкл." : "выкл."),
+                                     "Фото для сна", "Управление файлами",
+                                     "Сброс позиции книги", "USB-файлы"};
+      for (unsigned i = 0; i < 5; i++)
+        text(4, 31 + i * 16,
              std::string(i == settingSelection ? "> " : "  ") + choices[i]);
       text(4, 116, "1: выбор; 2: открыть; 3: назад");
     } else if (view == Apps || view == Photos || view == FileManager ||
@@ -806,6 +827,7 @@ void stopNetwork() {
   incoming.close();
   receiving = false;
 }
+#include "usb_device.h"
 inh::Value host(const std::string &n, const std::vector<inh::Value> &a) {
   auto count = [&](size_t k) {
     if (a.size() != k)
@@ -870,7 +892,7 @@ inh::Value host(const std::string &n, const std::vector<inh::Value> &a) {
   return inh::Value(0);
 }
 void sleepNow() {
-  if (indexing || receiving || displayFault)
+  if (usbActive || indexing || receiving || displayFault)
     return;
   // First drain all queued frames, then submit exactly one final image.
   uint32_t started = millis();
@@ -923,6 +945,11 @@ void gesture(inh::Gesture g) {
   if (g == inh::Gesture::None)
     return;
   activeAt = millis();
+  if (usbActive) {
+    if (g == inh::Gesture::Triple || g == inh::Gesture::Hold)
+      exitUsb();
+    return;
+  }
   if (g == inh::Gesture::Hold) {
     if (!fsReady) {
       view = Format;
@@ -1028,7 +1055,7 @@ void gesture(inh::Gesture g) {
       render();
   } else if (view == Settings) {
     if (g == inh::Gesture::Single)
-      settingSelection = (settingSelection + 1) % 4;
+      settingSelection = (settingSelection + 1) % 5;
     if (g == inh::Gesture::Double) {
       if (settingSelection == 0) {
         flipped = !flipped;
@@ -1039,6 +1066,9 @@ void gesture(inh::Gesture g) {
       } else if (settingSelection == 2) {
         listFiles(nullptr);
         view = FileManager;
+      } else if (settingSelection == 4) {
+        enterUsb();
+        return;
       } else {
         page = 0;
         savePage();
@@ -1115,6 +1145,8 @@ void gesture(inh::Gesture g) {
   }
 }
 void setup() {
+  serialMutex = xSemaphoreCreateMutex();
+  Serial.setRxBufferSize(2048);
   Serial.begin(115200);
   beginBattery();
   rtc_gpio_deinit(GPIO_NUM_0);
@@ -1133,9 +1165,14 @@ void setup() {
   button.reset(millis(), digitalRead(0) == LOW);
   fsReady = LittleFS.begin(false);
   activeAt = millis();
+  if (fsReady)
+    LittleFS.remove("/usb-upload.tmp");
   if (!fsReady) {
     view = Format;
     render();
+  } else if (prefs.getBool("usbMode", false)) {
+    LittleFS.remove("/usb-upload.tmp");
+    enterUsb();
   } else if (!INH_APPS || esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT0)
     openBook();
   else
@@ -1144,6 +1181,11 @@ void setup() {
 void loop() {
   try {
     gesture(button.tick(millis(), digitalRead(0) == LOW));
+    if (usbActive) {
+      usbTick();
+      delay(2);
+      return;
+    }
     if (wifiOn) {
       dns.processNextRequest();
       web.handleClient();
@@ -1167,10 +1209,14 @@ void loop() {
         millis() - activeAt > 120000)
       sleepNow();
   } catch (const std::bad_alloc &) {
+    if (usbActive)
+      exitUsb();
     indexing = false;
     vm.stop();
     memoryError();
   } catch (const std::exception &e) {
+    if (usbActive)
+      exitUsb();
     indexing = false;
     vm.stop();
     error(e.what());
