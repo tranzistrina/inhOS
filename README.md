@@ -21,7 +21,7 @@ First installation from unrelated firmware uses the bundled merged first-install
 
 ## USB file manager (0.3.0)
 
-[Русская инструкция и готовые клиенты](desktop/README-RU.md), [INHFS/1 protocol](docs/INHFS-1.md). On the device select Settings → USB-файлы, then open the Windows/macOS client. CP2102 UART0, 115200 baud, native USB CDC disabled. Wi-Fi/app/indexing stop during the session; Deep-sleep is inhibited. Triple-click or hold exits. USB mode survives a reset on port open; a disconnected idle session drops after 60 seconds, but the device waits in USB mode until button exit/reconnect. File transfers time out after 15 seconds without valid packets. GUI Disconnect returns to normal mode. Existing file data is replaced atomically only after validation; enough free space for the entire temporary copy is required.
+[Русская инструкция и готовые клиенты](desktop/README-RU.md), [INHFS/1 protocol](docs/INHFS-1.md). On the device select Settings → USB-файлы, then open the Windows/macOS client. CP2102 UART0, 115200 baud, native USB CDC disabled. Wi-Fi/app/indexing stop during the session; Deep-sleep is inhibited. Triple-click or hold exits. USB mode survives a reset on port open; after an established connection has no valid requests for 60 seconds the USB session closes and the device returns to normal mode. File transfers time out after 15 seconds without valid packets. GUI Disconnect returns to normal mode. Existing file data is replaced atomically only after validation; enough free space for the entire temporary copy is required.
 
 ## Battery indicator
 

@@ -4,6 +4,7 @@
 #include "Ginh.h"
 #include "UsbFs.h"
 #include <chrono>
+#include <cassert>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -158,10 +159,31 @@ struct Host final : Backend {
   }
 };
 int main(int argc, char **argv) {
-  if (argc != 2)
+  if (argc != 2 && argc != 3)
     return 1;
   Host host(argv[1]);
   Server server(host, 112233);
+  if (argc == 3) {
+    std::array<uint8_t, MaxPacket> bytes{};
+    Packet q;
+    auto request = [&](uint32_t now) {
+      size_t size = pack(q, bytes.data());
+      server.receive(bytes.data(), size, now, [](const uint8_t *, size_t) {});
+    };
+    q.op = Hello; q.seq = 1; q.size = 7;
+    memcpy(q.data.data(), "INHFS/1", 7); request(0);
+    assert(server.connected);
+    q = Packet{}; q.op = PutBegin; q.seq = 2; q.session = 112234; q.size = 14;
+    put32(q.data.data(), 10); put32(q.data.data() + 4, 123);
+    memcpy(q.data.data() + 8, "/a.inh", 6); request(1);
+    assert(fs::exists(host.root / "usb-upload.tmp"));
+    server.tick(15002);
+    assert(!fs::exists(host.root / "usb-upload.tmp"));
+    assert(server.connected && !server.closed);
+    server.tick(60002);
+    assert(!server.connected && server.closed);
+    return 0;
+  }
   Decoder decoder;
   auto start = std::chrono::steady_clock::now();
   auto now = [&]() {

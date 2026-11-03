@@ -240,6 +240,8 @@ class UsbTests(unittest.TestCase):
             self.assertEqual((self.root/'cli-out').read_bytes(),(self.root/'pty.inh').read_bytes())
         finally:
             live.close(False);stop.set();worker.join(2);os.close(master);os.close(slave)
+    def test_firmware_timeout_state(self):
+        subprocess.run([str(ROOT/'build/usb_host'),str(self.root/'timeout-device'),'--timeout-check'],check=True)
     def test_decoder_noise_overflow(self):
         raw=p.packet(p.PING,3,session=8,data=b'\xc0\xdb')
         d=p.Decoder();self.assertEqual(d.feed(b'ROM boot\n'+b'\xc0'+b'x'*1000+p.frame(raw)),[raw])

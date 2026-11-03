@@ -193,6 +193,7 @@ public:
     if (connected && uint32_t(now - touched) > 60000) {
       abort();
       connected = false;
+      closed = true;
     }
   }
   template <class Send>
