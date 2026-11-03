@@ -453,10 +453,13 @@ bool removeUser(const String &path) {
 void launchApp(const String &path) {
   if (!inh::userPath(path.c_str()) || !path.endsWith(".inh"))
     throw std::runtime_error("Неверное приложение");
+  book.close();
+  indexFile.close();
   vm.stop();
   File f = LittleFS.open(path, "r");
   auto source = appSource(f);
   f.close();
+  std::vector<String>().swap(apps);
   auto program = compileApp(source);
   std::string().swap(source);
   vm.start(std::move(program));
