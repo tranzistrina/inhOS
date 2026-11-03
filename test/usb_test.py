@@ -22,13 +22,14 @@ from inhfs import protocol as p
 from inhfs.images import encode
 
 class Transport:
-    def __init__(self,folder):
+    def __init__(self,folder,binary="usb_host"):
         self.folder=folder
+        self.binary=binary
         self.process=None
         self.drop=False;self.corrupt=False;self.bad_response=False;self.break_at=False
         self.start()
     def start(self):
-        self.process=subprocess.Popen([str(ROOT/'build/usb_host'),str(self.folder)],stdin=subprocess.PIPE,stdout=subprocess.PIPE)
+        self.process=subprocess.Popen([str(ROOT/'build'/self.binary),str(self.folder)],stdin=subprocess.PIPE,stdout=subprocess.PIPE)
     def restart(self):
         self.process.kill();self.process.wait();self.process.stdin.close();self.process.stdout.close();self.start()
     def write(self,data):
@@ -71,8 +72,9 @@ class Transport:
     def shutdown(self):
         if self.process is not None:
             self.process.stdin.close()
-            self.process.wait(timeout=3)
+            code=self.process.wait(timeout=3)
             self.process.stdout.close()
+            if code != 0: raise AssertionError(f'Firmware host exited {code}; sanitizer/LSan failure')
             self.process=None
 
 class UsbTests(unittest.TestCase):
@@ -163,6 +165,16 @@ class UsbTests(unittest.TestCase):
         with self.assertRaises(Cancelled):self.client.download('/a.inh',target,cancel)
         self.assertEqual(target.read_bytes(),b'local old')
     def test_repeated_sessions(self):
+        # ASan retains freed objects in quarantine: RSS is not live heap there.
+        # First exercise sanitized server; LSan checks it on clean process exit.
+        for i in range(80):
+            self.client.session=0;self.client.seq=1
+            self.client.request(p.HELLO,b'INHFS/1')
+            self.client.upload(self.source('asan.inh',b'# sanitized session\n'*100))
+            self.client.download('/asan.inh',self.root/'asan-out')
+        self.client.close(False);self.transport.shutdown()
+        self.transport=Transport(self.fs,'usb_host_profile')
+        self.client=Client(self.transport);self.client.connect()
         source=self.source('repeat.inh',b'# repeated session\n'*100)
         self.client.upload(source)
         def rss():

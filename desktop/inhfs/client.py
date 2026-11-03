@@ -76,6 +76,8 @@ def prepare(source, directory):
     if ext == '.txt':
         return source, '/book.txt'
     if ext == '.ginh':
+        if source.stat().st_size != 3833:
+            raise InhError('GINH должен содержать ровно 3833 байта')
         decode(source.read_bytes())
         return source, '/' + name + ext
     if ext == '.inh':
